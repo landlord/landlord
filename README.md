@@ -29,6 +29,8 @@ Under the hood, `landlord` will perform an HTTP `POST` of its arguments, includi
 The obligatory "hello world":
 
 ```java
+import landlord.System;
+
 public class Main {
 
     public static void main(String[] args) {
@@ -37,10 +39,12 @@ public class Main {
 }
 ```
 
+> Note the import of `landlord.System`. This is important in order to obtain a system in relation to your particular program. If you use the regular JDK system then you'll get the system of the JVM as a whole.
+
 Upon compiling, and supposing a folder containing our "hello world" class at `./hello-world/out/production/hello-world`:
 
 ```
-landlord -cp ./hello-world/out/production/hello-world Main
+tar -c . | landlord -cp ./hello-world/out/production/hello-world Main
 ```
 
 ## Landlord
