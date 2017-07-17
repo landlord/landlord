@@ -1,19 +1,19 @@
 *** CONCEPT ***
 
 # Landlord
-Landload provides the ability to run multiple JVM based applications on the one JVM
+Landlord provides the ability to run multiple JVM based applications on the one JVM
 
 ## Why
 JVM programs take up too much resident memory. Back in the day of Java 1.1, a minimal JVM application outputting "Hello world" would take about about 4MiB of resident memory. Nowadays, the same program in Java 8 takes around 45MiB of resident memory - typically 10 times as much! While Java 9's modules may help reduce the JVM's footprint, there's a lot of commonality between the JRE's of an individual JVM that can be shared.
 
-Also, compare a typical JVM "microservice" to one written using a native target, such as LLVM; the JVM one will occupy more than 10 times the amount of memory when compared to the native one. The JVM's consumption of memory may have been fine for the monolith, but when it comes to running many JVM based microservices (processes), their resident memory usage makes you want to program in something closer to the metal... or seek the "landlord" project!dddd
+Also, compare a typical JVM "microservice" to one written using a native target, such as LLVM; the JVM one will occupy more than 10 times the amount of memory when compared to the native one. The JVM's consumption of memory may have been fine for the monolith, but when it comes to running many JVM based microservices (processes), their resident memory usage makes you want to program in something closer to the metal... or seek the "landlord" project!
 
 Discounting the regular JVM overhead of runnning the first service, Running Landlord will reduce the typical "hello world" down to the requirements of its classpath - typically less than 1KiB (yes, you read that right...).
 
 ## What
 Landlord is a daemon service named `landlordd`. `landlordd` launches the JVM and runs some code that provides an RESTful HTTP service where you can submit your JVM program to run. You may also send various [POSIX signals](https://en.wikipedia.org/wiki/Signal_(IPC)) that may be trapped by your program in the conventional way for the JVM. You manage the daemon's lifecycle as per other services on your machines e.g. via initd. 
 
-A client is also provided, and named `landlord`. This client interfaces with `landlordd`.
+A client is also provided, and named `landlord`. This client interfaces with `landlordd` and accepts a filesystem via stdin.
 
 ## How
 You must also replace the use of the JDK's `System` object with a one provided by Landlord. That's about it!
