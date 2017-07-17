@@ -1,4 +1,4 @@
-* * * CONCEPT * * *
+*** CONCEPT ***
 
 # Landlord
 Landload provides the ability to run multiple JVM based applications on the one JVM
