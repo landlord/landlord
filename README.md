@@ -10,7 +10,7 @@ JVM programs take up too much resident memory. Back in the day of Java 1.1, a mi
 
 Also, compare a typical JVM "microservice" to one written using a native target, such as LLVM; the JVM one will occupy around 350MiB which is more than 10 times the amount of memory when compared to a native one. The JVM's consumption of memory may have been fine for the monolith, but when it comes to running many JVM based microservices (processes), their resident memory usage makes you want to program in something closer to the metal... or seek the "landlord" project!
 
-Discounting the regular JVM overhead of runnning the first service, Running Landlord will reduce a typical "hello world" down to the requirements of its classpath - typically less than 1KiB (yes, you read that right!).
+Discounting the regular JVM overhead of runnning the first service, Running Landlord will reduce a typical "hello world" down to the requirements of its classpath.
 
 ## What
 Landlord is a daemon service named `landlordd`. `landlordd` launches the JVM and runs some code that provides a secure RESTful HTTP service where you can submit your JVM program to run. You may also send various [POSIX signals](https://en.wikipedia.org/wiki/Signal_(IPC)) that are trapped by your program in the conventional way for the JVM. You manage the daemon's lifecycle as per other services on your machines e.g. via initd. 
@@ -20,7 +20,7 @@ A client is also provided and named `landlord`. This client interfaces with `lan
 ## How
 From the command line, simply use the `landlord` command instead of the `java` tool and pass its filesystem via tar on `stdin` and you're good to go.
 
-Under the hood, `landlord` will use a usergroup-secured Unix domain socket send of its arguments, including the streaming of the `tar` based file system from `stdin`. `landlordd` will consume the stream and create a new process invoked with the same `java` command that it was invoked with. Most operating systems perform a copy-on-read of memory segments when forking processes and thus share most of the JVM's memory. Complete process isolation is attained.
+Under the hood, `landlord` will use a usergroup-secured Unix domain socket send of its arguments, including the streaming of the `tar` based file system from `stdin`. `landlordd` will consume the stream and create a new process invoked with the same `java` command that it was invoked with. Most operating systems perform a copy-on-read of memory segments when forking processes and thus share most of the JVM's memory (thanks to [Jason Longshore](https://github.com/longshorej) for highlighting this to me). Complete process isolation can then be attained.
 
 ### An example
 
