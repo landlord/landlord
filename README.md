@@ -13,18 +13,18 @@ Also, compare a typical JVM "microservice" to one written using a native target,
 Discounting the regular JVM overhead of runnning the first service, Running Landlord will reduce a typical "hello world" down to the requirements of its classpath.
 
 ## What
-Landlord is a daemon service named `landlordd`. `landlordd` launches the JVM and runs some code that provides a secure RESTful HTTP service where you can submit your JVM program to run. You may also send various [POSIX signals](https://en.wikipedia.org/wiki/Signal_(IPC)) that are trapped by your program in the conventional way for the JVM. You manage the daemon's lifecycle as per other services on your machines e.g. via initd. 
+Landlord is a daemon service named `landlordd`. `landlordd` launches the JVM and runs some code that provides a secure Unix socket domain service where you can submit your JVM program to run. You may also send various [POSIX signals](https://en.wikipedia.org/wiki/Signal_(IPC)) that are trapped by your program in the conventional way for the JVM. You manage the daemon's lifecycle as per other services on your machines e.g. via initd. 
 
 A client is also provided and named `landlord`. This client interfaces with `landlordd` and accepts a filesystem via stdin.
 
 ## How
 From the command line, simply use the `landlord` command instead of the `java` tool and pass its filesystem via tar on `stdin` and you're good to go.
 
-Under the hood, `landlord` will use a usergroup-secured Unix domain socket send of its arguments, including the streaming of the `tar` based file system from `stdin`. `landlordd` will consume the stream and create a new process invoked with the same `java` command that it was invoked with. Most operating systems perform a copy-on-read of memory segments when forking processes and thus share most of the JVM's memory (thanks to [Jason Longshore](https://github.com/longshorej) for highlighting this to me). Complete process isolation can then be attained.
+Under the hood, `landlord` will use a usergroup-secured Unix domain socket to send its arguments, including the streaming of the `tar` based file system from `stdin`. `landlordd` will consume the stream and create a new process invoked with a similar `java` command to the one it was invoked with. Most operating systems perform a copy-on-read of memory segments when forking processes and thus share most of the JVM's memory (thanks to [Jason Longshore](https://github.com/longshorej) for highlighting this to me). Complete process isolation can then be attained along with an isolated garbage collector and process cleanup.
 
 ### An example
 
-The obligatory "hello world":
+The obligatory "hello world" - standard Java:
 
 ```java
 public class Main {
@@ -44,11 +44,11 @@ tar -c . | landlord -cp ./hello-world/out/production/hello-world Main
 ## landlord
 `landlord` will stream your commands to `landlordd` and then wait on a response. The response will yield the exit code from your program which will then cause `landlord` exit with the same response code.
 
-Any POSIX signals sent to `landlord` while it is waiting for a reply will be forwarded onto `landlordd` and received by your program.
+Any POSIX signals sent to `landlord` while it is waiting for a reply will be forwarded onto `landlordd` and are then received by your program.
 
 Note that in the case of long-lived programs (the most typical scenario for a microservice at least), then `landlord` will not return until your program terminates.
 
 ## landlordd
-You can run as many `landlordd` daemons as you wish and as your system will allow.
+You can run as many `landlordd` daemons as you wish and as your system will allow. Quite often though, you should just need one.
 
 (c)opyright 2017, Christopher Hunt
