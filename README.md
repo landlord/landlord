@@ -18,21 +18,15 @@ Landlord is a daemon service named `landlordd`. `landlordd` launches the JVM and
 A client is also provided and named `landlord`. This client interfaces with `landlordd` and accepts a filesystem via stdin.
 
 ## How
-From a code perspective, you must also replace the use of the JDK's `System` object with a one provided by Landlord. That's about it!
-
 From the command line, simply use the `landlord` command instead of the `java` tool and pass its filesystem via tar on `stdin` and you're good to go.
 
-There are some cavaets in that some of the `java` tool's options are not supported i.e. `-X`, `-agentlib` and others associated with the JVM as a whole.
-
-Under the hood, `landlord` will perform a secure HTTPS `POST` of its arguments, including the streaming of the `tar` based file system from `stdin`. `landlordd` will consume the `POST` and create a new class loader to load your jars and class files from the filesystem your provided, and in accordance with `cp` and `jar` arguments. Upon your program exiting, the classloader will available for garbarge collection.
+Under the hood, `landlord` will use a usergroup-secured Unix domain socket send of its arguments, including the streaming of the `tar` based file system from `stdin`. `landlordd` will consume the stream and create a new process invoked with the same `java` command that it was invoked with. Most operating systems perform a copy-on-read of memory segments when forking processes and thus share most of the JVM's memory. Complete process isolation is attained.
 
 ### An example
 
 The obligatory "hello world":
 
 ```java
-import landlord.System;
-
 public class Main {
 
     public static void main(String[] args) {
@@ -41,8 +35,6 @@ public class Main {
 }
 ```
 
-> Note the import of `landlord.System`. This is important in order to obtain a system in relation to your particular program. If you use the regular JDK system then you'll get the system of the JVM as a whole.
-
 Upon compiling and supposing a folder containing our "hello world" class at `./hello-world/out/production/hello-world`:
 
 ```
@@ -50,13 +42,13 @@ tar -c . | landlord -cp ./hello-world/out/production/hello-world Main
 ```
 
 ## landlord
-`landlord` will `POST` your commands to `landlordd` and then wait on a response. The response will yield the exit code from your program which will then cause `landlord` exit with the same response code.
+`landlord` will stream your commands to `landlordd` and then wait on a response. The response will yield the exit code from your program which will then cause `landlord` exit with the same response code.
 
 Any POSIX signals sent to `landlord` while it is waiting for a reply will be forwarded onto `landlordd` and received by your program.
 
 Note that in the case of long-lived programs (the most typical scenario for a microservice at least), then `landlord` will not return until your program terminates.
 
 ## landlordd
-You can run as many `landlordd` daemons as you wish and as your system will allow. When starting `landlordd`, you typically provide a secret for clients to connect with, and an IP and port for landlordd to listen for HTTPS requests on. Any memory requirements for the JVM should consider all of the programs that it will host.
+You can run as many `landlordd` daemons as you wish and as your system will allow.
 
 (c)opyright 2017, Christopher Hunt
