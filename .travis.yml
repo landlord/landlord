@@ -1,3 +1,6 @@
 language: scala
 
-before_script: cd landlordd
+before_script: 
+  - cd landlordd
+  - _JAVA_OPTIONS=
+
