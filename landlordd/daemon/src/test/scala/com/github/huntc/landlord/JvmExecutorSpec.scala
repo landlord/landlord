@@ -4,14 +4,15 @@ import akka.util.{ ByteString, ByteStringBuilder }
 import akka.actor.ActorSystem
 import akka.stream.ActorMaterializer
 import akka.stream.scaladsl.Source
-import akka.testkit.{ TestKit, TestProbe }
+import akka.testkit._
 import java.io.ByteArrayOutputStream
 import java.nio.ByteOrder
-import java.nio.file.{ Files, Path, Paths }
+import java.nio.file.{ Files, Paths }
 import org.apache.commons.compress.archivers.ArchiveStreamFactory
 import org.apache.commons.compress.archivers.tar.{ TarArchiveEntry, TarArchiveOutputStream }
 import org.scalatest._
 import scala.concurrent.{ ExecutionContext, Future, Promise }
+import scala.concurrent.duration._
 
 class JvmExecutorSpec extends TestKit(ActorSystem("JvmExecutorSpec"))
   with AsyncWordSpecLike with Matchers with BeforeAndAfterAll {
@@ -161,7 +162,7 @@ class JvmExecutorSpec extends TestKit(ActorSystem("JvmExecutorSpec"))
 
       val watcher = TestProbe()
       watcher.watch(process)
-      watcher.expectTerminated(process)
+      watcher.expectTerminated(process, max = 5.seconds.dilated)
 
       outputOk
     }
