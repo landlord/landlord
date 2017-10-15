@@ -11,6 +11,9 @@ lazy val bootstrap = project
       jna,
       scalaTest % Test
     ),
+    compileOrder in Compile := CompileOrder.JavaThenScala,
+    compileOrder in Test := CompileOrder.Mixed,
+    unmanagedSourceDirectories in Compile := (javaSource in Compile).value :: Nil,
     crossPaths := false,
     autoScalaLibrary := false
   )
@@ -29,9 +32,6 @@ lazy val daemon = project
       scalaTest % Test
     ),
     resolvers += Resolvers.typesafeBintrayReleases,
-    compileOrder in Compile := CompileOrder.JavaThenScala,
-    compileOrder in Test := CompileOrder.Mixed,
-    unmanagedSourceDirectories in Compile := (javaSource in Compile).value :: Nil,
     scriptClasspathOrdering := {
       val assemblyFile = assembly.value
       Seq(assemblyFile -> ("lib/" + assemblyFile.getName))
