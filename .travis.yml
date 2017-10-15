@@ -1,5 +1,3 @@
 language: scala
 
 before_script: cd landlordd
-
-script: sbt test
