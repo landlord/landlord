@@ -138,7 +138,7 @@ class JvmExecutorSpec extends TestKit(ActorSystem("JvmExecutorSpec"))
               .runFold(ByteString.empty)(_ ++ _)
               .map { bytes =>
                 val (_, _, _, byteStrings) = bytes.foldLeft((false, 0, 0, List.empty[ByteStringBuilder])) {
-                  case ((false, 0, 0, byteStrings), byte) if byte == 'o'.toByte =>
+                  case ((false, 0, 0, byteStrings), byte) if byte == 'o'.toByte || byte == 'e'.toByte =>
                     (true, 0, 0, byteStrings)
                   case ((false, 0, 0, byteStrings), byte) if byte == 'x'.toByte =>
                     (false, 0, 4, byteStrings :+ ByteString.newBuilder)
@@ -154,9 +154,9 @@ class JvmExecutorSpec extends TestKit(ActorSystem("JvmExecutorSpec"))
                     byteStrings.last.putByte(byte)
                     (false, 0, size - 1, byteStrings)
                 }
-                val stdoutBytes = byteStrings.dropRight(1).foldLeft(ByteString.empty)(_ ++ _.result)
+                val outputBytes = byteStrings.dropRight(1).foldLeft(ByteString.empty)(_ ++ _.result)
                 val exitCodeBytes = byteStrings.last.result
-                assert(stdoutBytes.utf8String == stdin && exitCodeBytes.iterator.getInt(ByteOrder.BIG_ENDIAN) == 0)
+                assert(outputBytes.utf8String == stdin && exitCodeBytes.iterator.getInt(ByteOrder.BIG_ENDIAN) == 0)
               }
           }(ExecutionContext.Implicits.global) // We use this context to get us off the ScalaTest one (which would hang this)
 
