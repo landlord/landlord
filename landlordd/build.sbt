@@ -54,7 +54,7 @@ lazy val daemon = project
       val targetDir = (resourceManaged in Test).value
       val testClassesMappings = {
         val sourceDir = (classDirectory in Compile in test).value
-        (PathFinder(sourceDir).***).pair(Path.rebase(sourceDir, targetDir))
+        (PathFinder(sourceDir).allPaths).pair(Path.rebase(sourceDir, targetDir))
       }
       val bootstrapAssemblyMappings = {
         val sourceAssembly = (assembly in bootstrap).value
