@@ -67,6 +67,7 @@ lazy val daemon = project
     // Native packager
     bashScriptExtraDefines += s"""addJava "-Dlandlordd.bootstrap-lib.path=$${app_home}/../$bootstrapLibPath"""",
     executableScriptName := "landlordd",
+    javaOptions in Universal ++= Seq("-J-Xms8m", "-J-Xmx8m", "-J-Xss256k"),
     mappings in Universal += {
       val bootstrapAssembly = (assembly in bootstrap).value
       bootstrapAssembly -> bootstrapLibPath
