@@ -43,7 +43,7 @@ object Main extends App {
       implicit val mat = ActorMaterializer()
 
       Tcp().bind(config.bindIp, config.bindPort).runForeach { connection =>
-        println(s"New connection from: ${connection.remoteAddress}")
+        system.log.info("New connection from {}", connection.remoteAddress)
 
         val flow =
           Flow[ByteString]
@@ -63,7 +63,7 @@ object Main extends App {
 
         connection.handleWith(flow)
       }
-      println("Ready.")
+      system.log.info("Ready.")
 
     case None =>
     // arguments are bad, error message will have been displayed

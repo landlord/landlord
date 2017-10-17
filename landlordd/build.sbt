@@ -26,7 +26,9 @@ lazy val daemon = project
     name := "daemon",
     libraryDependencies ++= Seq(
       akkaContribExtra,
+      akkSlf4j,
       commonsCompress,
+      logbackClassic,
       scopt,
       akkaTestKit % Test,
       scalaTest % Test
