@@ -278,10 +278,10 @@ class JvmExecutor(in: Source[ByteString, NotUsed], out: Promise[Source[ByteStrin
       }
 
   def receive: Receive =
-    starting
+    starting(unstopped = true)
 
-  def starting: Receive = {
-    case StartProcess(commandLine, stdinSource) =>
+  def starting(unstopped: Boolean): Receive = {
+    case StartProcess(commandLine, stdinSource) if unstopped =>
       val javaCommand = Paths.get(sys.props.get("java.home").getOrElse("/usr") + "/bin/java").toString
       parser.parse(commandLine.split(" "), JavaConfig()) match {
         case Some(javaConfig) =>
@@ -298,8 +298,11 @@ class JvmExecutor(in: Source[ByteString, NotUsed], out: Promise[Source[ByteStrin
           self ! ExitEarly(1, Some("Command line error: " + commandLine))
       }
 
-    case _: StopProcess =>
+    case _: StartProcess =>
       self ! ExitEarly(128 + SIGINT, None)
+
+    case _: StopProcess =>
+      context.become(starting(unstopped = false))
 
     case ExitEarly(exitStatus, errorMessage) =>
       out.success(
