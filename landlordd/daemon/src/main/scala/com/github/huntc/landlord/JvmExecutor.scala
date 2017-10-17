@@ -8,6 +8,7 @@ import akka.util.ByteString
 import akka.stream.{ ActorMaterializer, AbruptStageTerminationException, Attributes, FlowShape, Inlet, Outlet, OverflowStrategy, QueueOfferResult }
 import akka.stream.stage.{ AsyncCallback, GraphStage, GraphStageLogic, InHandler, OutHandler }
 import akka.stream.scaladsl.{ Keep, Sink, Source, SourceQueueWithComplete }
+import java.io.ByteArrayOutputStream
 import java.nio.ByteOrder
 import java.nio.file.{ Path, Paths }
 import scala.concurrent.{ ExecutionContext, Future, Promise }
@@ -173,6 +174,16 @@ object JvmExecutor {
       }
   }
 
+  private[landlord] class BoundedByteArrayOutputStream extends ByteArrayOutputStream {
+    val MaxOutputSize = 8192
+
+    override def write(c: Int): Unit =
+      if (count + 1 < MaxOutputSize) super.write(c)
+
+    override def write(b: Array[Byte], off: Int, len: Int): Unit =
+      if (count + (len - off) < MaxOutputSize) super.write(b, off, len)
+  }
+
   private[landlord] case class JavaConfig(
       cp: String = "",
       mainClass: String = ""
@@ -283,7 +294,10 @@ class JvmExecutor(in: Source[ByteString, NotUsed], out: Promise[Source[ByteStrin
   def starting(unstopped: Boolean): Receive = {
     case StartProcess(commandLine, stdinSource) if unstopped =>
       val javaCommand = Paths.get(sys.props.get("java.home").getOrElse("/usr") + "/bin/java").toString
-      parser.parse(commandLine.split(" "), JavaConfig()) match {
+      val errCapture = new BoundedByteArrayOutputStream
+      Console.withErr(errCapture) {
+        parser.parse(commandLine.split(" "), JavaConfig())
+      } match {
         case Some(javaConfig) =>
           val args =
             List(
@@ -295,7 +309,7 @@ class JvmExecutor(in: Source[ByteString, NotUsed], out: Promise[Source[ByteStrin
           context.actorOf(NonBlockingProcess.props(args, workingDir = processDirPath.toAbsolutePath))
           context.become(started(stdinSource, Promise[Int]()))
         case None =>
-          self ! ExitEarly(1, Some("Command line error: " + commandLine))
+          self ! ExitEarly(1, Some(errCapture.toString))
       }
 
     case _: StartProcess =>
