@@ -1,0 +1,32 @@
+<configuration>
+
+    <appender name="console" class="ch.qos.logback.core.ConsoleAppender">
+        <encoder>
+            <pattern>%msg%n</pattern>
+        </encoder>
+    </appender>
+
+    <appender name="file" class="ch.qos.logback.core.rolling.RollingFileAppender">
+        <file>${log-file:-logs/landlordd.log}</file>
+        <rollingPolicy class="ch.qos.logback.core.rolling.SizeAndTimeBasedRollingPolicy">
+            <fileNamePattern>${log-file-archive:-logs/landlordd-%d{yyyy-MM-dd}.%i.log.gz}</fileNamePattern>
+            <maxFileSize>3MB</maxFileSize>
+            <maxHistory>14</maxHistory>
+            <totalSizeCap>60MB</totalSizeCap>
+        </rollingPolicy>
+        <encoder>
+            <pattern>%date{"yyyy-MM-dd'T'HH:mm:ss.SSS'Z'",UTC} ${HOSTNAME} %-5level %logger{0} [%mdc] - %msg%n</pattern>
+        </encoder>
+    </appender>
+
+    <logger name="com.github.huntc" level="debug" additivity="false">
+        <appender-ref ref="console"/>
+        <appender-ref ref="file"/>
+    </logger>
+
+    <root level="${root.loglevel:-info}">
+        <appender-ref ref="console"/>
+        <appender-ref ref="file"/>
+    </root>
+
+</configuration>

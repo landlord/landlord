@@ -1,0 +1,6 @@
+language: scala
+
+before_script: 
+  - cd landlordd
+  - unset _JAVA_OPTIONS
+
