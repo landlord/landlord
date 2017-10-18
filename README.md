@@ -1,7 +1,7 @@
 *** CONCEPT ***
 
 # Landlord
-Landlord provides the ability to run multiple JVM based applications on the one JVM. This is otherwise known as "multi tenancy", hence the name, "Landlord". :-)
+Landlord provides the ability to run multiple JVM based applications on the one JVM thereby conserving resident memory *with no additional burden on the developer*. This is otherwise known as "multi tenancy", hence the name, "Landlord". :-)
 
 > There are similar projects out there, including [Nailgun](https://github.com/martylamb/nailgun#nailgun). My requirements are to address security from the beginning and focus on using the mininum number of threads by avoiding blocking IO. In particularly, each thread's stack space will take up 1MiB of memory and I'm wanting to be very conservative in terms of memory usage). I'm also looking for isolation and want to consider cgroups. While projects like Nailgun could perhaps be updated to accomodate my requirements, I feel that a clean start is appropriate. Retrofitting non-blocking/asynchronous behaviour in particular is difficult. Another goal is that I'd like there to be a very high degree of compatibility between running a JVM program normally vs Landlord. Hence the CLI tool it uses presents nearly all of the same arguments as the `java` command. A high degree of compatibility equates to wider adoption.
 
