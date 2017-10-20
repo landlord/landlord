@@ -1,27 +1,49 @@
 package com.github.huntc.landlord
 
 import akka.NotUsed
-import akka.actor.{ Actor, PoisonPill, Props }
-import akka.contrib.process.NonBlockingProcess
+import akka.actor.{ Actor, ActorLogging, PoisonPill, Props }
 import akka.pattern.pipe
 import akka.util.ByteString
-import akka.stream.{ ActorMaterializer, AbruptStageTerminationException, Attributes, FlowShape, Inlet, Outlet, OverflowStrategy, QueueOfferResult }
-import akka.stream.stage.{ AsyncCallback, GraphStage, GraphStageLogic, InHandler, OutHandler }
-import akka.stream.scaladsl.{ Keep, Sink, Source, SourceQueueWithComplete }
-import java.io.ByteArrayOutputStream
+import akka.stream._
+import akka.stream.stage._
+import akka.stream.scaladsl.{ BroadcastHub, Keep, Sink, Source, SourceQueueWithComplete, StreamConverters }
+import java.io.{ ByteArrayOutputStream, PrintStream }
+import java.lang.reflect.InvocationTargetException
+import java.net.URLClassLoader
 import java.nio.ByteOrder
 import java.nio.file.{ Path, Paths }
+import java.security.Permission
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.Properties
+
 import scala.concurrent.{ ExecutionContext, Future, Promise }
+import scala.concurrent.duration.FiniteDuration
 import scala.annotation.tailrec
 import scala.util.control.NonFatal
 import scala.util.Success
 
 object JvmExecutor {
-  def props(in: Source[ByteString, NotUsed], out: Promise[Source[ByteString, NotUsed]], bootstrapLibPath: Path, processDirPath: Path): Props =
-    Props(new JvmExecutor(in, out, bootstrapLibPath, processDirPath))
+  def props(
+    processId: String,
+    properties: ThreadGroupProperties, securityManager: ThreadGroupSecurityManager, useDefaultSecurityManager: Boolean, preventShutdownHooks: Boolean,
+    stdin: ThreadGroupInputStream, stdinTimeout: FiniteDuration, stdout: ThreadGroupPrintStream, stderr: ThreadGroupPrintStream,
+    in: Source[ByteString, NotUsed], out: Promise[Source[ByteString, NotUsed]],
+    outputDrainTimeAtExit: FiniteDuration,
+    processDirPath: Path
+  ): Props =
+    Props(
+      new JvmExecutor(
+        processId,
+        properties, securityManager, useDefaultSecurityManager, preventShutdownHooks,
+        stdin, stdinTimeout, stdout, stderr,
+        in, out,
+        outputDrainTimeAtExit,
+        processDirPath
+      )
+    )
 
   case class StartProcess(commandLine: String, stdin: Source[ByteString, AnyRef])
-  case class StopProcess(signal: Int)
+  case class SignalProcess(signal: Int)
 
   private[landlord] sealed abstract class ProcessInputPart
   private[landlord] case class CommandLine(value: String) extends ProcessInputPart
@@ -32,16 +54,16 @@ object JvmExecutor {
   private[landlord] class ProcessParameterParser(implicit mat: ActorMaterializer, ec: ExecutionContext)
     extends GraphStage[FlowShape[ByteString, ProcessInputPart]] {
 
-    val in = Inlet[ByteString]("ProcessParameters.in")
-    val out = Outlet[ProcessInputPart]("ProcessParameters.out")
+    private val in = Inlet[ByteString]("ProcessParameters.in")
+    private val out = Outlet[ProcessInputPart]("ProcessParameters.out")
 
-    override val shape = FlowShape.of(in, out)
+    override val shape: FlowShape[ByteString, ProcessInputPart] = FlowShape.of(in, out)
 
     override def createLogic(attr: Attributes): GraphStageLogic =
       new GraphStageLogic(shape) {
 
-        val asyncTryPull = getAsyncCallback[Unit](_ => if (!hasBeenPulled(in)) tryPull(in))
-        val asyncCancel = getAsyncCallback[Unit](_ => cancel(in))
+        private val asyncTryPull = getAsyncCallback[Unit](_ => if (!hasBeenPulled(in)) tryPull(in))
+        private val asyncCancel = getAsyncCallback[Unit](_ => cancel(in))
 
         def receiveCommandLine(commandLine: StringBuilder)(bytes: ByteString): ByteString = {
           val posn = bytes.indexOf('\n')
@@ -54,6 +76,7 @@ object JvmExecutor {
             commandLine ++= left.utf8String
             emit(out, CommandLine(commandLine.toString))
             becomeReceiveTar()
+            if (right.size <= 1) pull(in)
             right.drop(1)
           }
         }
@@ -64,7 +87,7 @@ object JvmExecutor {
               .queue[ByteString](100, OverflowStrategy.backpressure)
               .prefixAndTail(0)
               .map {
-                case (_, in) => in
+                case (_, arIn) => arIn
               }
               .toMat(Sink.head)(Keep.both)
               .run
@@ -110,7 +133,7 @@ object JvmExecutor {
               .queue[ByteString](100, OverflowStrategy.backpressure)
               .prefixAndTail(0)
               .map {
-                case (_, in) => in
+                case (_, stdinIn) => stdinIn
               }
               .toMat(Sink.head)(Keep.both)
               .run
@@ -185,13 +208,13 @@ object JvmExecutor {
   }
 
   private[landlord] case class JavaConfig(
-      cp: String = "",
+      cp: Seq[Path] = List.empty,
       mainClass: String = ""
   )
 
   private[landlord] val parser = new scopt.OptionParser[JavaConfig](Version.executableScriptName) {
     opt[String]("classpath").abbr("cp").action { (x, c) =>
-      c.copy(cp = x)
+      c.copy(cp = x.split(":").map(p => Paths.get(p)))
     }
 
     arg[String]("main class").action { (x, c) =>
@@ -202,7 +225,6 @@ object JvmExecutor {
   private[landlord] case class ExitEarly(exitStatus: Int, errorMessage: Option[String])
 
   private[landlord] val SIGINT = 2
-  private[landlord] val SIGKILL = 9
   private[landlord] val SIGTERM = 15
 
   private[landlord] def sizeToBytes(size: Int): ByteString =
@@ -213,10 +235,17 @@ object JvmExecutor {
 
   private[landlord] val StdoutPrefix = ByteString('o'.toByte)
   private[landlord] val StderrPrefix = ByteString('e'.toByte)
+
+  private[landlord] val ShutdownHooksPerm = new RuntimePermission("shutdownHooks")
+
+  private[landlord] case class ExitException(status: Int) extends SecurityException
 }
 
 /**
- * A JVM Executor creates a JVM process and is also responsible for terminating it.
+ * A JVM Executor creates a new thread group along with a new class loader, also redirecting
+ * stdio. The goal is to make the "process" think that it is running by itself with its
+ * world appearing close to what it would look like as if it were invoked directly. The
+ * executor is also responsible for terminating the process.
  *
  * The executor is constructed with a stream through which `java` command line args are
  * received along with a tar filesystem to read from followed by stdin and a signal. An outward
@@ -245,11 +274,18 @@ object JvmExecutor {
  * terminated. All stdout and stderr is guaranteed to be sent prior to the exit code being
  * transmitted.
  */
-class JvmExecutor(in: Source[ByteString, NotUsed], out: Promise[Source[ByteString, NotUsed]], bootstrapLibPath: Path, processDirPath: Path) extends Actor {
+class JvmExecutor(
+    processId: String,
+    properties: ThreadGroupProperties, securityManager: ThreadGroupSecurityManager, useDefaultSecurityManager: Boolean, preventShutdownHooks: Boolean,
+    stdin: ThreadGroupInputStream, stdinTimeout: FiniteDuration, stdout: ThreadGroupPrintStream, stderr: ThreadGroupPrintStream,
+    in: Source[ByteString, NotUsed], out: Promise[Source[ByteString, NotUsed]],
+    outputDrainTimeAtExit: FiniteDuration,
+    processDirPath: Path
+) extends Actor with ActorLogging {
 
   import JvmExecutor._
 
-  implicit val mat = ActorMaterializer()
+  implicit val mat: ActorMaterializer = ActorMaterializer()
   import context.dispatcher
 
   def stopSelfWhenDone(mat: NotUsed, done: Future[akka.Done]): NotUsed = {
@@ -257,7 +293,8 @@ class JvmExecutor(in: Source[ByteString, NotUsed], out: Promise[Source[ByteStrin
     NotUsed
   }
 
-  override def preStart: Unit =
+  override def preStart: Unit = {
+    log.debug("Process actor starting for {}", processId)
     in
       .via(new ProcessParameterParser)
       .runFoldAsync("") {
@@ -275,7 +312,7 @@ class JvmExecutor(in: Source[ByteString, NotUsed], out: Promise[Source[ByteStrin
           self ! StartProcess(cl, value)
           Future.successful(cl)
         case (cl, Signal(value)) =>
-          self ! StopProcess(value)
+          self ! SignalProcess(value)
           Future.successful(cl)
       }
       .recover {
@@ -284,30 +321,140 @@ class JvmExecutor(in: Source[ByteString, NotUsed], out: Promise[Source[ByteStrin
           // still active
           throw e
         case NonFatal(e) =>
+          log.error(e, "Error while processing stream")
           self ! ExitEarly(1, Some(e.getMessage))
           throw e
       }
+      .andThen {
+        case _ => self ! SignalProcess(SIGINT)
+      }
+  }
 
   def receive: Receive =
     starting(unstopped = true)
 
   def starting(unstopped: Boolean): Receive = {
     case StartProcess(commandLine, stdinSource) if unstopped =>
-      val javaCommand = Paths.get(sys.props.get("java.home").getOrElse("/usr") + "/bin/java").toString
       val errCapture = new BoundedByteArrayOutputStream
+      val commandLineArgs = commandLine.split(" ")
       Console.withErr(errCapture) {
-        parser.parse(commandLine.split(" "), JavaConfig())
+        parser.parse(commandLineArgs, JavaConfig())
       } match {
         case Some(javaConfig) =>
-          val args =
-            List(
-              javaCommand,
-              "-cp", bootstrapLibPath.toAbsolutePath.toString + (if (javaConfig.cp.nonEmpty) ":" + javaConfig.cp else ""),
-              "com.github.huntc.landlord.Main", // Launch via our bootstrap class so that we get a look-in to do stuff.
-              javaConfig.mainClass
+          // Setup stdio streaming
+          val stdinIs = stdinSource.runWith(StreamConverters.asInputStream(stdinTimeout))
+
+          def createPrintStreamAndSource: (PrintStream, Source[ByteString, NotUsed]) = {
+            val (os, source) =
+              StreamConverters.asOutputStream()
+                .toMat(BroadcastHub.sink)(Keep.both)
+                .run()
+            (new PrintStream(os), source)
+          }
+          val (stdoutPos, stdoutSource) = createPrintStreamAndSource
+          val (stderrPos, stderrSource) = createPrintStreamAndSource
+
+          val exitStatusPromise = Promise[Int]()
+
+          // Resolve our process classes
+          val classpath = javaConfig.cp.map(cp => processDirPath.resolve(cp).toUri.toURL)
+          val classLoader = new URLClassLoader(classpath.toArray, this.getClass.getClassLoader.getParent)
+          try {
+            val cls = classLoader.loadClass(javaConfig.mainClass)
+            val mainArgs = commandLineArgs.tail
+            val meth = cls.getMethod("main", mainArgs.getClass)
+
+            // Launch our "process"
+            val stopped = new AtomicBoolean(false)
+            val processThreadGroup =
+              new ThreadGroup("process-" + processId) {
+                override def uncaughtException(t: Thread, e: Throwable): Unit =
+                  if (stopped.compareAndSet(false, true)) {
+                    val status = e match {
+                      case ite: InvocationTargetException =>
+                        ite.getCause match {
+                          case ExitException(s) =>
+                            s // It is normal for this exception to occur given that we want the process to explicitly exit
+                          case null =>
+                            System.err.println("An invocation error cause is unexpectedly null. Stacktrace follows.")
+                            ite.printStackTrace() // Shouldn't happen in the context of an invocation error.
+                            1
+                          case otherCause =>
+                            otherCause.printStackTrace() // General uncaught errors within the process.
+                            1
+                        }
+                      case otherException =>
+                        System.err.println("An internal error has occurred within landlord. Stacktrace follows.")
+                        otherException.printStackTrace()
+                        70 // EXIT_SOFTWARE, Internal Software Error as defined in BSD sysexits.h
+                    }
+                    stdin.destroy()
+                    stdout.destroy()
+                    stderr.destroy()
+                    Thread.sleep(outputDrainTimeAtExit.toMillis)
+                    stdoutPos.close()
+                    stderrPos.close()
+                    classLoader.close()
+                    exitStatusPromise.success(status)
+                  } else {
+                    throw e // Forward any further exceptions once we've exited
+                  }
+              }
+            val processThread =
+              new Thread(
+                processThreadGroup,
+                { () =>
+                  stdin.init(stdinIs)
+                  stdout.init(stdoutPos)
+                  stderr.init(stderrPos)
+                  val props = new Properties(properties.fallback)
+                  props.setProperty("user.dir", processDirPath.toAbsolutePath.toString)
+                  properties.init(props)
+                  securityManager.init(new SecurityManager() {
+                    override def checkExit(status: Int): Unit =
+                      throw ExitException(status) // This will be caught as an uncaught exception
+                    override def checkPermission(perm: Permission): Unit = {
+                      if (perm == ShutdownHooksPerm) {
+                        val message = """|: Shutdown hooks are not applicable within landlord as many applications reside in the same JVM.
+                                         |Declare a `public static void trap(int signal)` for trapping signals and catch `SecurityException`
+                                         |around your shutdown hook code.""".stripMargin
+                        if (preventShutdownHooks)
+                          throw new SecurityException("Error" + message)
+                        else
+                          System.err.println("Warning" + message)
+                      } else if (useDefaultSecurityManager) {
+                        super.checkPermission(perm)
+                      }
+                    }
+                    override def checkPermission(perm: Permission, context: Object): Unit =
+                      if (useDefaultSecurityManager) super.checkPermission(perm, context)
+                  })
+                  meth.invoke(null, mainArgs.asInstanceOf[Object])
+                }: Runnable
+              )
+
+            out.success(
+              stdoutSource
+                .map(bytes => StdoutPrefix ++ sizeToBytes(bytes.size) ++ bytes)
+                .merge(stderrSource.map(bytes => StderrPrefix ++ sizeToBytes(bytes.size) ++ bytes))
+                .concat(
+                  Source.fromFuture(
+                    exitStatusPromise
+                      .future
+                      .map(exitStatusToBytes)
+                  )
+                )
+                .watchTermination()(stopSelfWhenDone)
             )
-          context.actorOf(NonBlockingProcess.props(args, workingDir = processDirPath.toAbsolutePath))
-          context.become(started(stdinSource, Promise[Int]()))
+
+            processThread.start()
+
+            context.become(started(cls, processThreadGroup, exitStatusPromise))
+          } catch {
+            case NonFatal(e) =>
+              classLoader.close()
+              self ! ExitEarly(1, Some(if (e.getCause != null) e.getCause.toString else e.toString))
+          }
         case None =>
           self ! ExitEarly(1, Some(errCapture.toString))
       }
@@ -315,7 +462,7 @@ class JvmExecutor(in: Source[ByteString, NotUsed], out: Promise[Source[ByteStrin
     case _: StartProcess =>
       self ! ExitEarly(128 + SIGINT, None)
 
-    case _: StopProcess =>
+    case _: SignalProcess =>
       context.become(starting(unstopped = false))
 
     case ExitEarly(exitStatus, errorMessage) =>
@@ -329,25 +476,22 @@ class JvmExecutor(in: Source[ByteString, NotUsed], out: Promise[Source[ByteStrin
       )
   }
 
-  def started(stdinSource: Source[ByteString, AnyRef], exitStatusPromise: Promise[Int]): Receive = {
-    case NonBlockingProcess.Started(pid, stdin, stdout, stderr) =>
-      stdinSource.runWith(stdin)
-      out.success(
-        stdout
-          .map(bytes => StdoutPrefix ++ sizeToBytes(bytes.size) ++ bytes)
-          .merge(stderr.map(bytes => StderrPrefix ++ sizeToBytes(bytes.size) ++ bytes))
-          .concat(Source.fromFuture(exitStatusPromise.future.map(exitStatusToBytes)))
-          .watchTermination()(stopSelfWhenDone))
-
-    case StopProcess(signal) =>
-      val process = context.children.headOption
-      signal match {
-        case SIGTERM => process.foreach(_ ! NonBlockingProcess.Destroy)
-        case SIGKILL => process.foreach(_ ! NonBlockingProcess.DestroyForcibly)
-        case other   => sys.error(s"Unsupported signal: $other. Ignoring.")
-      }
-
-    case NonBlockingProcess.Exited(status) =>
-      exitStatusPromise.success(status)
+  def started(mainClass: Class[_], processThreadGroup: ThreadGroup, exitStatusPromise: Promise[Int]): Receive = {
+    case SignalProcess(signal) =>
+      if (!exitStatusPromise.isCompleted)
+        new Thread(
+          processThreadGroup,
+          { () =>
+            try {
+              val signalMeth = mainClass.getMethod("trap", Integer.TYPE)
+              signalMeth.invoke(null, signal.asInstanceOf[Object])
+            } catch {
+              case _: NoSuchMethodException =>
+            }
+          }: Runnable
+        ).start()
   }
+
+  override def postStop(): Unit =
+    log.debug("Process actor stopped for {}", processId)
 }
