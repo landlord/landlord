@@ -20,7 +20,7 @@ class TarStreamWriterSpec extends TestKit(ActorSystem("TarStreamWriterSpec"))
 
   "The TarStreamWriter" should {
     "Write out a valid stream of Tar input" in {
-      implicit val mat = ActorMaterializer()
+      implicit val mat: ActorMaterializer = ActorMaterializer()
       val rootPath = Files.createTempDirectory("TarStreamWriterSpec")
       rootPath.toFile.deleteOnExit()
       val source =
@@ -59,7 +59,7 @@ class TarStreamWriterSpec extends TestKit(ActorSystem("TarStreamWriterSpec"))
     }
 
     "Reject an invalid stream of Tar input by failing the future" in {
-      implicit val mat = ActorMaterializer()
+      implicit val mat: ActorMaterializer = ActorMaterializer()
       val rootPath = Files.createTempDirectory("TarStreamWriterSpec")
       rootPath.toFile.deleteOnExit()
       val source = Source.single(ByteString.empty)

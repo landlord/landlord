@@ -2,15 +2,17 @@ package com.github.huntc.landlord
 
 import akka.util.{ ByteString, ByteStringBuilder }
 import akka.actor.ActorSystem
-import akka.stream.ActorMaterializer
+import akka.stream.{ ActorMaterializer, ThrottleMode }
 import akka.stream.scaladsl.Source
 import akka.testkit._
 import java.io.ByteArrayOutputStream
 import java.nio.ByteOrder
 import java.nio.file.{ Files, Paths }
+
 import org.apache.commons.compress.archivers.ArchiveStreamFactory
 import org.apache.commons.compress.archivers.tar.{ TarArchiveEntry, TarArchiveOutputStream }
 import org.scalatest._
+
 import scala.concurrent.{ ExecutionContext, Future, Promise }
 import scala.concurrent.duration._
 
@@ -21,7 +23,7 @@ class JvmExecutorSpec extends TestKit(ActorSystem("JvmExecutorSpec"))
     TestKit.shutdownActorSystem(system)
   }
 
-  implicit val mat = ActorMaterializer()
+  implicit val ma: ActorMaterializer = ActorMaterializer()
 
   "The ProcessParameterParser" should {
     "produce a flow of ProcessInputParts in the required order given a valid input" in {
@@ -42,7 +44,7 @@ class JvmExecutorSpec extends TestKit(ActorSystem("JvmExecutorSpec"))
         bos.toByteArray
       }
 
-      val stdin = "some stdin\nsome more stdin\n"
+      val stdinStr = "some stdin\nsome more stdin\n"
 
       val signal = 15
 
@@ -52,21 +54,22 @@ class JvmExecutorSpec extends TestKit(ActorSystem("JvmExecutorSpec"))
         .single(
           ByteString(cl + "\n") ++
             ByteString(tar) ++
-            ByteString(stdin + "\u0004") ++
+            ByteString(stdinStr + "\u0004") ++
             ByteString.newBuilder.putInt(signal)(ByteOrder.BIG_ENDIAN).result()
         )
+        .concat(Source.single(ByteString.empty)) // FIXME: This line shouldn't be necessary, but I wonder there's a race condition... possibly, related to https://github.com/akka/akka/issues/23111?
         .via(new JvmExecutor.ProcessParameterParser)
-        .runFoldAsync(0 -> assert(true)) {
-          case ((ordinal, _), JvmExecutor.CommandLine(value)) =>
-            Future.successful(1 -> assert(ordinal == 0 && value == cl))
-          case ((ordinal, _), JvmExecutor.Archive(value)) =>
-            val complete = value.runFold(0L)(_ + _.size)
+        .runFoldAsync(0 -> succeed) {
+          case ((ordinal, _), JvmExecutor.CommandLine(v)) =>
+            Future.successful(1 -> assert(ordinal == 0 && v == cl))
+          case ((ordinal, _), JvmExecutor.Archive(v)) =>
+            val complete = v.runFold(0L)(_ + _.size)
             complete.map(tarSize => 2 -> assert(ordinal == 1 && tarSize == TarRecordSize))
-          case ((ordinal, _), JvmExecutor.Stdin(value)) =>
-            val complete = value.runFold("")(_ ++ _.utf8String)
-            complete.map(input => 3 -> assert(ordinal == 2 && input == stdin))
-          case ((ordinal, _), JvmExecutor.Signal(value)) =>
-            Future.successful(4 -> assert(ordinal == 3 && value == signal))
+          case ((ordinal, _), JvmExecutor.Stdin(v)) =>
+            val complete = v.runFold("")(_ ++ _.utf8String)
+            complete.map(input => 3 -> assert(ordinal == 2 && input == stdinStr))
+          case ((ordinal, _), JvmExecutor.Signal(v)) =>
+            Future.successful(4 -> assert(ordinal == 3 && v == signal))
         }
         .map {
           case (count, Succeeded) if count == 4 => Succeeded
@@ -78,6 +81,19 @@ class JvmExecutorSpec extends TestKit(ActorSystem("JvmExecutorSpec"))
 
   "The JVMExecutor" should {
     "start a process that then outputs stdin, ends and shuts everything down" in {
+      val stdin = new ThreadGroupInputStream(System.in)
+      val stdout = new ThreadGroupPrintStream(System.out)
+      val stderr = new ThreadGroupPrintStream(System.err)
+      System.setIn(stdin)
+      System.setOut(stdout)
+      System.setErr(stderr)
+
+      val properties = new ThreadGroupProperties(System.getProperties)
+      System.setProperties(properties)
+
+      val securityManager = new ThreadGroupSecurityManager(System.getSecurityManager)
+      System.setSecurityManager(securityManager)
+
       val cl = "-cp classes example.Hello"
 
       val tar = {
@@ -114,22 +130,31 @@ class JvmExecutorSpec extends TestKit(ActorSystem("JvmExecutorSpec"))
         bos.toByteArray
       }
 
-      val stdin = "Hello World\n"
+      val stdinStr = "Hello World\n"
 
       val in =
-        Source
-          .single(
+        Source(
+          List(
             ByteString(cl + "\n") ++
               ByteString(tar) ++
-              ByteString(stdin + "\u0004")
+              ByteString(stdinStr + "\u0004"),
+            ByteString("\u0015")
           )
+        ).throttle(1, 15.seconds.dilated, 1, ThrottleMode.Shaping) // We don't really want this test to receive the signal element, so we delay it.
 
       val out = Promise[Source[ByteString, akka.NotUsed]]()
-      val bootstrapLibPath = Paths.get(getClass.getResource("/bootstrap-assembly.jar").toURI)
       val processDirPath = Files.createTempDirectory("jvm-executor-spec")
-      processDirPath.toFile.deleteOnExit
+      processDirPath.toFile.deleteOnExit()
 
-      val process = system.actorOf(JvmExecutor.props(in, out, bootstrapLibPath, processDirPath))
+      val process =
+        system.actorOf(JvmExecutor.props(
+          "some-process",
+          properties, securityManager, useDefaultSecurityManager = false, preventShutdownHooks = true,
+          stdin, 3.seconds.dilated, stdout, stderr,
+          in, out,
+          12.seconds.dilated, 100.milliseconds.dilated,
+          processDirPath
+        ))
 
       val outputOk =
         out.future
@@ -137,26 +162,27 @@ class JvmExecutorSpec extends TestKit(ActorSystem("JvmExecutorSpec"))
             outSource
               .runFold(ByteString.empty)(_ ++ _)
               .map { bytes =>
-                val (_, _, _, byteStrings) = bytes.foldLeft((false, 0, 0, List.empty[ByteStringBuilder])) {
-                  case ((false, 0, 0, byteStrings), byte) if byte == 'o'.toByte || byte == 'e'.toByte =>
-                    (true, 0, 0, byteStrings)
-                  case ((false, 0, 0, byteStrings), byte) if byte == 'x'.toByte =>
-                    (false, 0, 4, byteStrings :+ ByteString.newBuilder)
-                  case ((true, 0, 0, byteStrings), byte) =>
-                    (true, 1, byte << 24, byteStrings)
-                  case ((true, 1, size, byteStrings), byte) =>
-                    (true, 2, size | (byte << 16), byteStrings)
-                  case ((true, 2, size, byteStrings), byte) =>
-                    (true, 3, size | (byte << 8), byteStrings)
-                  case ((true, 3, size, byteStrings), byte) =>
-                    (false, 0, size | byte, byteStrings :+ ByteString.newBuilder)
-                  case ((false, 0, size, byteStrings), byte) if size > 0 =>
-                    byteStrings.last.putByte(byte)
-                    (false, 0, size - 1, byteStrings)
-                }
+                val (_, _, _, byteStrings) =
+                  bytes.foldLeft((false, 0, 0, List.empty[ByteStringBuilder])) {
+                    case ((false, 0, 0, bs), b) if b == 'o'.toByte || b == 'e'.toByte =>
+                      (true, 0, 0, bs)
+                    case ((false, 0, 0, bs), b) if b == 'x'.toByte =>
+                      (false, 0, 4, bs :+ ByteString.newBuilder)
+                    case ((true, 0, 0, bs), b) =>
+                      (true, 1, (b & 0xff) << 24, bs)
+                    case ((true, 1, s, bs), b) =>
+                      (true, 2, s | ((b & 0xff) << 16), bs)
+                    case ((true, 2, s, bs), b) =>
+                      (true, 3, s | ((b & 0xff) << 8), bs)
+                    case ((true, 3, s, bs), b) =>
+                      (false, 0, s | (b & 0xff), bs :+ ByteString.newBuilder)
+                    case ((false, 0, s, bs), b) if s > 0 =>
+                      bs.last.putByte(b)
+                      (false, 0, s - 1, bs)
+                  }
                 val outputBytes = byteStrings.dropRight(1).foldLeft(ByteString.empty)(_ ++ _.result)
                 val exitCodeBytes = byteStrings.last.result
-                assert(outputBytes.utf8String == stdin && exitCodeBytes.iterator.getInt(ByteOrder.BIG_ENDIAN) == 0)
+                assert(outputBytes.utf8String == stdinStr && exitCodeBytes.iterator.getInt(ByteOrder.BIG_ENDIAN) == 0)
               }
           }(ExecutionContext.Implicits.global) // We use this context to get us off the ScalaTest one (which would hang this)
 
