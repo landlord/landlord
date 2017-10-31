@@ -19,6 +19,7 @@ import java.util.Properties
 import scala.concurrent.{ ExecutionContext, Future, Promise }
 import scala.concurrent.duration.FiniteDuration
 import scala.annotation.tailrec
+import scala.ref.WeakReference
 import scala.util.control.NonFatal
 import scala.util.Success
 
@@ -359,6 +360,7 @@ class JvmExecutor(
           // Resolve our process classes
           val classpath = javaConfig.cp.map(cp => processDirPath.resolve(cp).toUri.toURL)
           val classLoader = new URLClassLoader(classpath.toArray, this.getClass.getClassLoader.getParent)
+          val classLoaderWeakRef = new WeakReference(classLoader)
           try {
             val cls = classLoader.loadClass(javaConfig.mainClass)
             val mainArgs = commandLineArgs.tail
@@ -391,15 +393,18 @@ class JvmExecutor(
                     stdin.destroy()
                     stdout.destroy()
                     stderr.destroy()
+                    properties.destroy()
+                    securityManager.destroy()
                     Thread.sleep(outputDrainTimeAtExit.toMillis)
                     stdoutPos.close()
                     stderrPos.close()
-                    classLoader.close()
+                    classLoaderWeakRef.get.foreach(_.close())
                     exitStatusPromise.success(status)
                   } else {
                     throw e // Forward any further exceptions once we've exited
                   }
               }
+            processThreadGroup.setDaemon(true)
             val processThread =
               new Thread(
                 processThreadGroup,
