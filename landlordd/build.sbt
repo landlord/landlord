@@ -63,7 +63,7 @@ lazy val root = project
   .settings(
     inThisBuild(List(
       organization := "com.github.huntc",
-      scalaVersion := "2.12.3", // FIXME: Upgrade to 2.12.4 once sbt 1.0.3 is released
+      scalaVersion := "2.12.4",
       version      := "0.1.0-SNAPSHOT",
       scalacOptions ++= Seq("-unchecked", "-deprecation"),
       ScalariformKeys.preferences := ScalariformKeys.preferences.value
