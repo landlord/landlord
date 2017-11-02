@@ -8,9 +8,11 @@ import akka.testkit._
 import java.io.ByteArrayOutputStream
 import java.nio.ByteOrder
 import java.nio.file.{ Files, Paths }
+
 import org.apache.commons.compress.archivers.ArchiveStreamFactory
 import org.apache.commons.compress.archivers.tar.{ TarArchiveEntry, TarArchiveOutputStream }
 import org.scalatest._
+
 import scala.concurrent.{ ExecutionContext, Future, Promise }
 import scala.concurrent.duration._
 
@@ -24,7 +26,7 @@ class JvmExecutorSpec extends TestKit(ActorSystem("JvmExecutorSpec"))
   implicit val ma: ActorMaterializer = ActorMaterializer()
 
   "The ProcessParameterParser" should {
-    "produce a flow of ProcessInputParts in the required order given a valid input" in {
+    "produce a flow of ProcessInputParts in the required order given a valid input" ignore {
       val cl = "some args"
 
       val tar = {

@@ -18,7 +18,6 @@ import java.util.Properties
 
 import scala.concurrent.{ ExecutionContext, Future, Promise }
 import scala.concurrent.duration.FiniteDuration
-import scala.annotation.tailrec
 import scala.ref.WeakReference
 import scala.util.control.NonFatal
 import scala.util.Success
@@ -63,9 +62,6 @@ object JvmExecutor {
     override def createLogic(attr: Attributes): GraphStageLogic =
       new GraphStageLogic(shape) {
 
-        private val asyncTryPull = getAsyncCallback[Unit](_ => if (!hasBeenPulled(in)) tryPull(in))
-        private val asyncCancel = getAsyncCallback[Unit](_ => cancel(in))
-
         def receiveCommandLine(commandLine: StringBuilder)(bytes: ByteString): ByteString = {
           val posn = bytes.indexOf('\n')
           val (left, right) = bytes.splitAt(posn)
@@ -77,8 +73,12 @@ object JvmExecutor {
             commandLine ++= left.utf8String
             emit(out, CommandLine(commandLine.toString))
             becomeReceiveTar()
-            if (right.size <= 1) pull(in)
-            right.drop(1)
+            val carry = right.drop(1)
+            if (carry.nonEmpty)
+              asyncReceive.invoke(())
+            else
+              pull(in)
+            carry
           }
         }
 
@@ -93,39 +93,54 @@ object JvmExecutor {
               .toMat(Sink.head)(Keep.both)
               .run
           emit(out, Archive(Source.fromFutureSource(ar)))
-          become(receiveTar(asyncTryPull, asyncCancel, queue, ByteString.empty))
+          become(receiveTar(queue, ByteString.empty))
         }
 
+        private val Blocksize = 512
+        private val Eotsize = Blocksize * 2
+        private val BlockingFactor = 20
+        private val RecordSize = Blocksize * BlockingFactor
+        assert(RecordSize >= Eotsize)
+
         def receiveTar(
-          asyncTryPull: AsyncCallback[Unit], asyncCancel: AsyncCallback[Unit],
-          queue: SourceQueueWithComplete[ByteString], recordBuffer: ByteString)(bytes: ByteString): ByteString = {
-          val Blocksize = 512
-          val Eotsize = Blocksize * 2
-          val BlockingFactor = 20
-          val RecordSize = Blocksize * BlockingFactor
+          queue: SourceQueueWithComplete[ByteString],
+          recordBuffer: ByteString)(bytes: ByteString): ByteString = {
+
           val remaining = RecordSize - recordBuffer.size
           val (add, carry) = bytes.splitAt(remaining)
           val enqueueRecordBuffer = recordBuffer ++ add
-          val nonEnqueuedRecordBuffer =
-            if (enqueueRecordBuffer.size == RecordSize) {
-              queue.offer(enqueueRecordBuffer).andThen {
-                case Success(QueueOfferResult.Enqueued) => asyncTryPull.invoke(())
-                case _                                  => asyncCancel.invoke(())
-              }
-              ByteString.empty
-            } else if (carry.isEmpty && !hasBeenPulled(in)) {
-              tryPull(in)
-              enqueueRecordBuffer
-            } else {
-              enqueueRecordBuffer
+          if (enqueueRecordBuffer.size == RecordSize) {
+            val enqueued = new AtomicBoolean(false)
+            queue.offer(enqueueRecordBuffer).andThen {
+              case Success(QueueOfferResult.Enqueued) =>
+                enqueued.compareAndSet(false, true)
+                asyncReceive.invoke(())
+              case _ =>
+                asyncCancel.invoke(())
             }
-          if (enqueueRecordBuffer.takeRight(Eotsize).forall(_ == 0)) {
-            queue.complete()
-            becomeReceiveStdin()
+            become(receiveTarQueuePending(queue, enqueueRecordBuffer, enqueued))
           } else {
-            become(receiveTar(asyncTryPull, asyncCancel, queue, nonEnqueuedRecordBuffer))
+            if (!hasBeenPulled(in)) pull(in)
+            become(receiveTar(queue, enqueueRecordBuffer))
           }
           carry
+        }
+
+        def receiveTarQueuePending(
+          queue: SourceQueueWithComplete[ByteString],
+          recordBuffer: ByteString,
+          enqueued: AtomicBoolean)(bytes: ByteString): ByteString = {
+
+          if (enqueued.get()) {
+            if (recordBuffer.takeRight(Eotsize).forall(_ == 0)) {
+              queue.complete()
+              becomeReceiveStdin()
+            } else {
+              become(receiveTar(queue, ByteString.empty))
+            }
+            receive(bytes)
+          } else
+            bytes
         }
 
         def becomeReceiveStdin(): Unit = {
@@ -139,25 +154,46 @@ object JvmExecutor {
               .toMat(Sink.head)(Keep.both)
               .run
           emit(out, Stdin(Source.fromFutureSource(stdin)))
-          become(receiveStdin(asyncTryPull, asyncCancel, queue))
+          become(receiveStdin(queue))
         }
 
-        def receiveStdin(
-          asyncTryPull: AsyncCallback[Unit], asyncCancel: AsyncCallback[Unit],
-          queue: SourceQueueWithComplete[ByteString])(bytes: ByteString): ByteString = {
+        def receiveStdin(queue: SourceQueueWithComplete[ByteString])(bytes: ByteString): ByteString = {
           val eotPosn = bytes.indexOf(4)
           val (left, right) = if (eotPosn == -1) bytes -> ByteString.empty else bytes.splitAt(eotPosn)
-          queue.offer(left).andThen {
-            case Success(QueueOfferResult.Enqueued) => asyncTryPull.invoke(())
-            case _                                  => asyncCancel.invoke(())
+          if (left.nonEmpty) {
+            val enqueued = new AtomicBoolean(false)
+            queue.offer(left).andThen {
+              case Success(QueueOfferResult.Enqueued) =>
+                enqueued.compareAndSet(false, true)
+                asyncReceive.invoke(())
+              case _ =>
+                asyncCancel.invoke(())
+            }
+            become(receiveStdinQueuePending(queue, eotPosn, enqueued))
           }
-          if (eotPosn > -1) {
-            queue.complete()
-            become(receiveSignal(ByteString.empty))
-          } else {
-            become(receiveStdin(asyncTryPull, asyncCancel, queue))
-          }
-          right.drop(1)
+          val carry = right.drop(1)
+          if (carry.nonEmpty)
+            asyncReceive.invoke(())
+          else if (!hasBeenPulled(in))
+            pull(in)
+          carry
+        }
+
+        def receiveStdinQueuePending(
+          queue: SourceQueueWithComplete[ByteString],
+          eotPosn: Int,
+          enqueued: AtomicBoolean)(bytes: ByteString): ByteString = {
+
+          if (enqueued.get()) {
+            if (eotPosn > -1) {
+              queue.complete()
+              become(receiveSignal(ByteString.empty))
+            } else {
+              become(receiveStdin(queue))
+            }
+            receive(bytes)
+          } else
+            bytes
         }
 
         def receiveSignal(recordBuffer: ByteString)(bytes: ByteString): ByteString = {
@@ -170,8 +206,8 @@ object JvmExecutor {
             become(receiveFinished())
           } else {
             become(receiveSignal(newRecordBuffer))
+            if (!hasBeenPulled(in)) pull(in)
           }
-          if (carry.isEmpty) pull(in)
           carry
         }
 
@@ -180,20 +216,26 @@ object JvmExecutor {
 
         def become(receiver: ByteString => ByteString): Unit =
           receive = receiver
-        var receive: ByteString => ByteString = receiveCommandLine(new StringBuilder)
+        private var receive: ByteString => ByteString = receiveCommandLine(new StringBuilder)
+        private var carry: ByteString = ByteString.empty
+
+        private var asyncReceive: AsyncCallback[Unit] = _
+        private var asyncCancel: AsyncCallback[Unit] = _
+
+        override def preStart(): Unit = {
+          asyncReceive = getAsyncCallback[Unit](_ => carry = receive(carry))
+          asyncCancel = getAsyncCallback[Unit](_ => cancel(in))
+          pull(in)
+        }
 
         setHandler(in, new InHandler {
-          override def onPush(): Unit = {
-            @tailrec def doReceive(bytes: ByteString): ByteString =
-              if (bytes.nonEmpty) doReceive(receive(bytes)) else bytes
-            doReceive(grab(in))
-          }
+          override def onPush(): Unit =
+            carry = receive(carry ++ grab(in))
         })
 
         setHandler(out, new OutHandler {
-          override def onPull(): Unit = {
+          override def onPull(): Unit =
             if (!hasBeenPulled(in)) pull(in)
-          }
         })
       }
   }
