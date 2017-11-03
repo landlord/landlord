@@ -26,7 +26,7 @@ class JvmExecutorSpec extends TestKit(ActorSystem("JvmExecutorSpec"))
   implicit val ma: ActorMaterializer = ActorMaterializer()
 
   "The ProcessParameterParser" should {
-    "produce a flow of ProcessInputParts in the required order given a valid input" ignore {
+    "produce a flow of ProcessInputParts in the required order given a valid input" in {
       val cl = "some args"
 
       val tar = {
@@ -57,6 +57,7 @@ class JvmExecutorSpec extends TestKit(ActorSystem("JvmExecutorSpec"))
             ByteString(stdinStr + "\u0004") ++
             ByteString.newBuilder.putInt(signal)(ByteOrder.BIG_ENDIAN).result()
         )
+        .concat(Source.single(ByteString.empty)) // FIXME: This line shouldn't be necessary, but I wonder there's a race condition... possibly, related to https://github.com/akka/akka/issues/23111?
         .via(new JvmExecutor.ProcessParameterParser)
         .runFoldAsync(0 -> succeed) {
           case ((ordinal, _), JvmExecutor.CommandLine(v)) =>
