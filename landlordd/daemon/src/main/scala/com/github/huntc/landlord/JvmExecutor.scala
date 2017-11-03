@@ -212,7 +212,7 @@ object JvmExecutor {
         }
 
         def receiveFinished()(bytes: ByteString): ByteString =
-          receive(ByteString.empty)
+          ByteString.empty
 
         def become(receiver: ByteString => ByteString): Unit =
           receive = receiver
