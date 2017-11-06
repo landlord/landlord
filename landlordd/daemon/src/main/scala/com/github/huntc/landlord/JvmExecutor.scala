@@ -11,11 +11,12 @@ import java.io.{ ByteArrayOutputStream, PrintStream }
 import java.lang.reflect.InvocationTargetException
 import java.net.URLClassLoader
 import java.nio.ByteOrder
-import java.nio.file.{ Path, Paths }
+import java.nio.file.{ Files, Path, Paths }
 import java.security.Permission
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.Properties
 
+import scala.collection.JavaConverters._
 import scala.concurrent.{ ExecutionContext, Future, Promise }
 import scala.concurrent.duration.FiniteDuration
 import scala.ref.WeakReference
@@ -252,7 +253,8 @@ object JvmExecutor {
 
   private[landlord] case class JavaConfig(
       cp: Seq[Path] = List.empty,
-      mainClass: String = ""
+      mainClass: String = "",
+      mainArgs: Seq[String] = List.empty
   )
 
   private[landlord] val parser = new scopt.OptionParser[JavaConfig](Version.executableScriptName) {
@@ -263,7 +265,23 @@ object JvmExecutor {
     arg[String]("main class").action { (x, c) =>
       c.copy(mainClass = x)
     }
+
+    arg[String]("main args").optional().unbounded().action { (x, c) =>
+      c.copy(mainArgs = c.mainArgs :+ x)
+    }
   }
+
+  private[landlord] def resolvePaths(base: Path, relpath: Path): Seq[Path] =
+    if (!relpath.toString.endsWith("*")) { // Not a glob
+      List(base.resolve(relpath))
+    } else {
+      val stream = Files.newDirectoryStream(base.resolve(relpath.getParent), "*.{class,jar}")
+      try {
+        for (path <- stream.iterator().asScala.toList) yield path
+      } finally {
+        stream.close()
+      }
+    }
 
   private[landlord] case class ExitEarly(exitStatus: Int, errorMessage: Option[String])
 
@@ -400,13 +418,12 @@ class JvmExecutor(
           val exitStatusPromise = Promise[Int]()
 
           // Resolve our process classes
-          val classpath = javaConfig.cp.map(cp => processDirPath.resolve(cp).toUri.toURL)
+          val classpath = javaConfig.cp.flatMap(cp => resolvePaths(processDirPath, cp).map(_.toUri.toURL))
           val classLoader = new URLClassLoader(classpath.toArray, this.getClass.getClassLoader.getParent)
           val classLoaderWeakRef = new WeakReference(classLoader)
           try {
             val cls = classLoader.loadClass(javaConfig.mainClass)
-            val mainArgs = commandLineArgs.tail
-            val meth = cls.getMethod("main", mainArgs.getClass)
+            val meth = cls.getMethod("main", classOf[Array[String]])
 
             // Launch our "process"
             val stopped = new AtomicBoolean(false)
@@ -474,7 +491,7 @@ class JvmExecutor(
                     override def checkPermission(perm: Permission, context: Object): Unit =
                       if (useDefaultSecurityManager) super.checkPermission(perm, context)
                   })
-                  meth.invoke(null, mainArgs.asInstanceOf[Object])
+                  meth.invoke(null, javaConfig.mainArgs.toArray.asInstanceOf[Object])
                 }: Runnable
               )
 

@@ -79,6 +79,46 @@ class JvmExecutorSpec extends TestKit(ActorSystem("JvmExecutorSpec"))
     }
   }
 
+  "The Java config" should {
+    "Accept just two regular classpath arg and the main class" in {
+      val parsed = JvmExecutor.parser.parse(List("-cp", "somepath:someotherpath", "mainclass"), JvmExecutor.JavaConfig())
+      assert(parsed.contains(JvmExecutor.JavaConfig(List(Paths.get("somepath"), Paths.get("someotherpath")), "mainclass")))
+    }
+
+    "Accept just a glob classpath arg and the main class" in {
+      val parsed = JvmExecutor.parser.parse(List("-cp", "lib/*", "mainclass"), JvmExecutor.JavaConfig())
+      assert(parsed.contains(JvmExecutor.JavaConfig(List(Paths.get("lib/*")), "mainclass")))
+    }
+
+    "Return just the main class when no args" in {
+      val parsed = JvmExecutor.parser.parse(List("mainclass"), JvmExecutor.JavaConfig())
+      assert(parsed.contains(JvmExecutor.JavaConfig(List.empty, "mainclass")))
+    }
+
+    "Return the main class and args" in {
+      val parsed = JvmExecutor.parser.parse(List("mainclass", "mainarg0", "mainarg1"), JvmExecutor.JavaConfig())
+      assert(parsed.contains(JvmExecutor.JavaConfig(List.empty, "mainclass", List("mainarg0", "mainarg1"))))
+    }
+  }
+
+  "The classpath resolver" should {
+    "resolve a non-glob" in {
+      val resolved = JvmExecutor.resolvePaths(Paths.get("/tmp"), Paths.get("a.class")).toList
+      assert(resolved === List(Paths.get("/tmp/a.class")))
+    }
+
+    "resolve a glob" in {
+      val base = Files.createTempDirectory("classpath-resolver-spec")
+      base.toFile.deleteOnExit()
+      base.resolve("lib").toFile.mkdir()
+      Files.createFile(base.resolve("lib/a.class"))
+      Files.createFile(base.resolve("lib/b.jar"))
+      Files.createFile(base.resolve("lib/c.txt"))
+      val resolved = JvmExecutor.resolvePaths(base, Paths.get("lib/*")).toList
+      assert(resolved === List(base.resolve("lib/a.class"), base.resolve("lib/b.jar")))
+    }
+  }
+
   "The JVMExecutor" should {
     "start a process that then outputs stdin, ends and shuts everything down" in {
       val stdin = new ThreadGroupInputStream(System.in)
