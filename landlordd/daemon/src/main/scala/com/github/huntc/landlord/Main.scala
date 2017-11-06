@@ -3,18 +3,23 @@ package com.github.huntc.landlord
 import akka.NotUsed
 import akka.actor.ActorSystem
 import akka.stream.scaladsl.{ Flow, Source, Tcp }
-import akka.stream.ActorMaterializer
+import akka.stream.{ ActorMaterializer, Materializer }
 import akka.util.ByteString
 import java.nio.file.{ Files, Path, Paths }
-import scala.concurrent.duration._
 import scala.concurrent.Promise
+import scala.concurrent.duration._
 
 object Main extends App {
   case class Config(
       bindIp: String = "127.0.0.1",
       bindPort: Int = 9000,
-      bootstrapLibPath: Path = Paths.get(sys.props.getOrElse("landlordd.bootstrap-lib.path", "")),
-      processDirPath: Path = Files.createTempDirectory("jvm-executor"))
+      exitTimeout: FiniteDuration = 12.seconds,
+      preventShutdownHooks: Boolean = false,
+      outputDrainTimeAtExit: FiniteDuration = 100.milliseconds,
+      processDirPath: Path = Files.createTempDirectory("jvm-executor"),
+      stdinTimeout: FiniteDuration = 1.hour,
+      useDefaultSecurityManager: Boolean = false
+  )
 
   val parser = new scopt.OptionParser[Config](Version.executableScriptName) {
     head(Version.executableScriptName, Version.current)
@@ -28,34 +33,81 @@ object Main extends App {
       c.copy(bindPort = x)
     }.text("The port to listen on")
 
-    opt[String]("bootstrap-lib-path").action { (x, c) =>
-      c.copy(bootstrapLibPath = Paths.get(x))
-    }.text("The path to bootstrap library used when forking Java processes.")
+    opt[String]("exit-timeout").action { (x, c) =>
+      c.copy(
+        exitTimeout =
+          Some(Duration(x))
+            .collect { case fd: FiniteDuration => fd }
+            .getOrElse(throw new IllegalArgumentException("Bad time - expecting a finite duration such as 10s: " + x))
+      )
+    }.text("The time to wait for a process to exit before interrupting. Defaults to 12 seconds (12s).")
+
+    opt[Unit]("prevent-shutdown-hooks").action { (_, c) =>
+      c.copy(preventShutdownHooks = true)
+    }.text("When set, a security exception will be thrown if shutdown hooks are detected within a process. Defaults to false, which then just warns on stderr.")
+
+    opt[String]("output-drain-time-at-exit").action { (x, c) =>
+      c.copy(
+        outputDrainTimeAtExit =
+          Some(Duration(x))
+            .collect { case fd: FiniteDuration => fd }
+            .getOrElse(throw new IllegalArgumentException("Bad time - expecting a finite duration such as 100ms: " + x))
+      )
+    }.text("The amount of time to wait for a process to have its stdout/stderr transmitted at exit. Defaults to 100 milliseconds (500ms).")
 
     opt[String]("process-dir-path").action { (x, c) =>
       c.copy(processDirPath = Paths.get(x))
     }.text("The path to use for the working directory for the process.")
+
+    opt[String]("stdin-timeout").action { (x, c) =>
+      c.copy(
+        stdinTimeout =
+          Some(Duration(x))
+            .collect { case fd: FiniteDuration => fd }
+            .getOrElse(throw new IllegalArgumentException("Bad time - expecting a finite duration such as 1h: " + x))
+      )
+    }.text("The maximum amount of time to block waiting on stdin. Defaults to 1 hour (1h).")
+
+    opt[Boolean]("use-default-security-manager").action { (x, c) =>
+      c.copy(useDefaultSecurityManager = x)
+    }.text("When true, the JVM's default security manager will be used for processes. The option defaults to false.")
   }
 
   parser.parse(args, Config()) match {
     case Some(config) =>
-      implicit val system = ActorSystem("landlordd")
-      implicit val mat = ActorMaterializer()
+      val stdin = new ThreadGroupInputStream(System.in)
+      val stdout = new ThreadGroupPrintStream(System.out)
+      val stderr = new ThreadGroupPrintStream(System.err)
+      System.setIn(stdin)
+      System.setOut(stdout)
+      System.setErr(stderr)
+
+      val properties = new ThreadGroupProperties(System.getProperties)
+      System.setProperties(properties)
+
+      val securityManager = new ThreadGroupSecurityManager(System.getSecurityManager)
+      System.setSecurityManager(securityManager)
+
+      implicit val system: ActorSystem = ActorSystem("landlordd")
+      implicit val mat: Materializer = ActorMaterializer()
 
       Tcp().bind(config.bindIp, config.bindPort).runForeach { connection =>
         system.log.info("New connection from {}", connection.remoteAddress)
 
         val flow =
           Flow[ByteString]
-            .prefixAndTail(0) // Lift our incoming stream into another Source that we can pass around
+            .prefixAndTail(0) // Lift our incoming stream into another Source that we can pass it around
             .map {
               case (_, in) =>
+                val processId = connection.remoteAddress.getPort.toString
                 val out = Promise[Source[ByteString, NotUsed]]()
                 system.actorOf(JvmExecutor.props(
-                  in,
-                  out,
-                  config.bootstrapLibPath,
-                  config.processDirPath.resolve(connection.remoteAddress.getPort.toString)
+                  processId,
+                  properties, securityManager, config.useDefaultSecurityManager, config.preventShutdownHooks,
+                  stdin, config.stdinTimeout, stdout, stderr,
+                  in, out,
+                  config.exitTimeout, config.outputDrainTimeAtExit,
+                  config.processDirPath.resolve(processId)
                 ))
                 Source.fromFutureSource(out.future)
             }

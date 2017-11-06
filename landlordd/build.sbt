@@ -3,29 +3,12 @@ import scalariform.formatter.preferences._
 
 import Dependencies._
 
-lazy val bootstrap = project
-  .in(file("bootstrap"))
-  .settings(
-    name := "bootstrap",
-    libraryDependencies ++= Seq(
-      jna,
-      scalaTest % Test
-    ),
-    compileOrder in Compile := CompileOrder.JavaThenScala,
-    compileOrder in Test := CompileOrder.Mixed,
-    unmanagedSourceDirectories in Compile := (javaSource in Compile).value :: Nil,
-    crossPaths := false,
-    autoScalaLibrary := false
-  )
-
-lazy val bootstrapLibPath = "extra/bootstrap.jar"
-
 lazy val daemon = project
   .in(file("daemon"))
   .settings(
     name := "daemon",
     libraryDependencies ++= Seq(
-      akkaContribExtra,
+      akkaStream,
       akkSlf4j,
       commonsCompress,
       logbackClassic,
@@ -54,30 +37,20 @@ lazy val daemon = project
     // Provide the test classes as resources for our tests
     resourceGenerators in Test += Def.task {
       val targetDir = (resourceManaged in Test).value
-      val testClassesMappings = {
+      val mappings = {
         val sourceDir = (classDirectory in Compile in test).value
-        (PathFinder(sourceDir).allPaths).pair(Path.rebase(sourceDir, targetDir))
+        PathFinder(sourceDir).allPaths.pair(Path.rebase(sourceDir, targetDir))
       }
-      val bootstrapAssemblyMappings = {
-        val sourceAssembly = (assembly in bootstrap).value
-        Seq(sourceAssembly -> targetDir / "bootstrap-assembly.jar")
-      }
-      val mappings = testClassesMappings ++ bootstrapAssemblyMappings
       IO.copy(mappings)
       mappings.map(_._2)
     }.dependsOn(compile in Compile in test).taskValue,
     // Native packager
-    bashScriptExtraDefines += s"""addJava "-Dlandlordd.bootstrap-lib.path=$${app_home}/../$bootstrapLibPath"""",
     executableScriptName := "landlordd",
-    javaOptions in Universal ++= Seq("-J-Xms8m", "-J-Xmx8m", "-J-Xss256k"),
-    mappings in Universal += {
-      val bootstrapAssembly = (assembly in bootstrap).value
-      bootstrapAssembly -> bootstrapLibPath
-    },
-    packageName in Universal := "landlord"
+    packageName in Universal := "landlord",
+    dockerBaseImage := "openjdk:8-jre-alpine",
+    dockerExposedPorts := List(9000)
   )
-  .enablePlugins(JavaAppPackaging)
-  .dependsOn(bootstrap % "test->test")
+  .enablePlugins(AshScriptPlugin, JavaAppPackaging)
 
 lazy val test = project
   .in(file("test"))
@@ -90,12 +63,13 @@ lazy val root = project
   .settings(
     inThisBuild(List(
       organization := "com.github.huntc",
-      scalaVersion := "2.12.3",
+      scalaVersion := "2.12.4",
       version      := "0.1.0-SNAPSHOT",
+      scalacOptions ++= Seq("-unchecked", "-deprecation"),
       ScalariformKeys.preferences := ScalariformKeys.preferences.value
         .setPreference(AlignSingleLineCaseStatements, true)
         .setPreference(DoubleIndentConstructorArguments, true)
         .setPreference(DanglingCloseParenthesis, Preserve)
     ))
   )
- .aggregate(bootstrap, daemon, test)
+ .aggregate(daemon, test)

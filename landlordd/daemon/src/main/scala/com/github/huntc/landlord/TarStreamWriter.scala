@@ -32,7 +32,7 @@ object TarStreamWriter {
           val buffer = Array.ofDim[Byte](BufferSize)
           blocking {
             @tailrec def foreachTarEntry(op: TarArchiveEntry => Unit): Unit =
-              tarInput.getNextTarEntry() match {
+              tarInput.getNextTarEntry match {
                 case null =>
                   ()
                 case entry =>
