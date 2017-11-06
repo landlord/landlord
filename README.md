@@ -1,7 +1,7 @@
 *** CONCEPT ***
 
 # Landlord
-Landlord provides the ability to run multiple JVM based applications on the one JVM thereby conserving resident memory *with little burden on the developer*. This sharing is otherwise known as "multi tenancy", hence the name, "Landlord". :-)
+Landlord is targeted at reducing the costs of supporting the JVM when running in production. Landlord provides the ability to run multiple JVM based applications on the one JVM thereby conserving resident memory *with little burden on the developer*. This sharing is otherwise known as "multi tenancy", hence the name, "Landlord". :-) The more that can be shared, the less memory is required on a single machine, the more services that can be run, the less machines required. Machines == money.
 
 ## Similar projects/initiatives
 There are similar projects out there, including [Nailgun](https://github.com/martylamb/nailgun#nailgun). My requirements are to address security from the beginning and focus on using the mininum number of threads by avoiding blocking IO. In particular, each thread's stack space will take up 1MiB of memory by default (256k, best case) and I'm wanting to be very conservative in terms of memory usage). I'm also looking for isolation and want to consider cgroups at the thread level. While projects like Nailgun could perhaps be updated to accomodate my requirements, I feel that a clean start is appropriate. Retrofitting non-blocking/asynchronous behaviour in particular is difficult. Another goal is that I'd like there to be a very high degree of compatibility between running a JVM program normally vs Landlord. Hence the CLI tool it uses presents nearly all of the same arguments as the `java` command. A high degree of compatibility equates to wider adoption.
@@ -98,5 +98,47 @@ Note that in the case of long-lived programs (the most typical scenario for a mi
 
 ## landlordd
 You can run as many `landlordd` daemons as you wish and as your system will allow. Quite often though, you should just need one.
+
+## Building
+1. Build the daemon:
+
+```
+cd landlord/landlordd/
+sbt daemon/stage
+```
+
+2. Run it (`/tmp/a` is simply where forked processes will run within):
+
+```
+daemon/target/universal/stage/bin/landlordd --process-dir-path=/tmp/a
+```
+
+You should see `Ready.` output when the daemon is ready to receive requests.
+
+3. From another terminal, launch a bash script that will connect to it, along with invoking a sample HelloWorld we have:
+
+```
+cd landlord/landlordd/
+./client.sh
+```
+
+You should then see a connection message output by the daemon. Something like:
+
+```
+New connection from: /127.0.0.1:63292
+```
+
+Type some stdin in the bash script window. Having done so, the sample hello world program we have should echo the stdin. Something like this:
+
+```
+$ ./client.sh
+Hi there
+o	Hi there
+x
+```
+
+`Hi there` is what I typed in. The `o` and `Hi there` is the stdout and the `x` is the exit code. We're not seeing some values such as the string length and actual exit code because the bash echo command is not outputting them (we'll write a more sophisticated native client down the track).
+
+The bash script expects you to just hit return to end sending stdin.
 
 (c)opyright 2017, Christopher Hunt
