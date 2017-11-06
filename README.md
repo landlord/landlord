@@ -14,7 +14,7 @@ JVM programs take up too much resident memory. Back in the day of Java 1.1, a mi
 
 Also, compare a typical JVM "microservice" to one written using a native target, such as LLVM; the JVM one will occupy around 350MiB which is more than 10 times the amount of memory when compared to a native one written in, say, Go. The JVM's consumption of memory may have been fine for the monolith, but when it comes to running many JVM based microservices (processes), their resident memory usage makes you want to program in something closer to the metal... or seek the "landlord" project!
 
-Discounting the regular JVM overhead of runnning the first service, Running Landlord will reduce a typical "hello world" down to the requirements of its classpath.
+Discounting the regular JVM overhead of runnning the first service, Running Landlord will reduce a typical "hello world" down to the requirements of its classpath. I've observed a simple Java Hello World app consuming less than 1MiB of memory compared to 35MiB when running as a standalone process. Bear in mind though that landlordd itself will realistically require 250MiB including room for running several processes (all depending on what the processes require of course!). 
 
 ## What
 Landlord is a daemon service named `landlordd`. `landlordd` launches the JVM and runs some code that provides a secure Unix socket domain service where you can submit your JVM program to run. You may also send various [POSIX signals](https://en.wikipedia.org/wiki/Signal_(IPC)) that are trapped by your program in the conventional way for the JVM. You manage the daemon's lifecycle as per other services on your machines e.g. via initd. 
