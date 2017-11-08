@@ -85,7 +85,7 @@ Some tradeoffs that have been identified:
 
 * The JIT indexes its work by classes within class loaders and so one "process's" JIT will not have a relation to another. This will result in more JIT activity, but an individual tenant might also get better performance in hot paths because JIT makes choices based on only that tenant's usage patterns, which might allow more aggressive inlining. This one is also no different to running multiple OS level processes.
 
-* One process can bring down the entire JVM. This is a trade-off that OSGi also accepts.
+* One tenant process can bring down the entire JVM, which is also a trait of OSGi. Bulkheads are important and there are degrees of isolation available in general e.g.: process, container, unikernel, VM with process level isolation being quite common. However, the JVM based process presently consumes a considerable order of magnitude more memory than its native counterparts (Go, Rust etc.). Process level isolation is not a good option where memory resources are constrained. Hence thread group/classloader is the next best thing if the risk of all tenants going down can be mitigated.
 
 Thanks to @retronym for his contribution to the above.
 
