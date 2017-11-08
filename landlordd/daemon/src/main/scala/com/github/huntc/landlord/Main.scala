@@ -1,11 +1,14 @@
 package com.github.huntc.landlord
 
+import java.nio.ByteOrder
+
 import akka.NotUsed
-import akka.actor.ActorSystem
-import akka.stream.scaladsl.{ Flow, Source, Tcp }
+import akka.actor.{ ActorSelection, ActorSystem, Props }
+import akka.stream.scaladsl.{ Flow, Sink, Source, Tcp }
 import akka.stream.{ ActorMaterializer, Materializer }
 import akka.util.ByteString
 import java.nio.file.{ Files, Path, Paths }
+
 import scala.concurrent.Promise
 import scala.concurrent.duration._
 
@@ -73,6 +76,51 @@ object Main extends App {
     }.text("When true, the JVM's default security manager will be used for processes. The option defaults to false.")
   }
 
+  def controlFlow(
+    launchInfoOp: (Source[ByteString, NotUsed], Promise[Source[ByteString, NotUsed]]) => (Int, Props),
+    sendKillOp: (ActorSelection, Int) => Unit
+  )(implicit system: ActorSystem, mat: Materializer): Flow[ByteString, ByteString, NotUsed] =
+
+    Flow[ByteString]
+      .prefixAndTail(1)
+      .map {
+        case (prefix, tail) =>
+          prefix.headOption match {
+            case Some(firstBytes) if firstBytes.iterator.getByte == 'l' =>
+              val in = Source.single(firstBytes.drop(1)).concat(tail)
+              val out = Promise[Source[ByteString, NotUsed]]()
+              val (processId, jvmExecutorProps) = launchInfoOp(in, out)
+              system.actorOf(jvmExecutorProps, processId.toString)
+              Source.fromFutureSource(out.future)
+            case Some(firstBytes) if firstBytes.iterator.getByte == 'k' =>
+              Source
+                .single(firstBytes.drop(1))
+                .concat(tail)
+                .fold(ByteString.empty) { (acc, bs) =>
+                  if (acc.size + bs.size <= 8)
+                    acc ++ bs
+                  else
+                    acc
+                }
+                .map { bs =>
+                  val iter = bs.iterator
+                  iter.getInt(ByteOrder.BIG_ENDIAN) -> iter.getInt(ByteOrder.BIG_ENDIAN)
+                }
+                .runForeach {
+                  case (processId, signal) =>
+                    sendKillOp(system.actorSelection(system.child(processId.toString)), signal)
+                }
+              Source.empty[ByteString]
+            case _ =>
+              tail.runWith(Sink.ignore)
+              Source.single(ByteString("???"))
+          }
+      }
+      .flatMapConcat(identity)
+
+  /*
+   * Main entry point.
+   */
   parser.parse(args, Config()) match {
     case Some(config) =>
       val stdin = new ThreadGroupInputStream(System.in)
@@ -94,27 +142,24 @@ object Main extends App {
       Tcp().bind(config.bindIp, config.bindPort).runForeach { connection =>
         system.log.info("New connection from {}", connection.remoteAddress)
 
-        val flow =
-          Flow[ByteString]
-            .prefixAndTail(0) // Lift our incoming stream into another Source that we can pass it around
-            .map {
-              case (_, in) =>
-                val processId = connection.remoteAddress.getPort.toString
-                val out = Promise[Source[ByteString, NotUsed]]()
-                system.actorOf(JvmExecutor.props(
-                  processId,
-                  properties, securityManager, config.useDefaultSecurityManager, config.preventShutdownHooks,
-                  stdin, config.stdinTimeout, stdout, stderr,
-                  in, out,
-                  config.exitTimeout, config.outputDrainTimeAtExit,
-                  config.processDirPath.resolve(processId)
-                ))
-                Source.fromFutureSource(out.future)
-            }
-            .flatMapConcat(identity)
+        def launchInfoOp(in: Source[ByteString, NotUsed], out: Promise[Source[ByteString, NotUsed]]): (Int, Props) = {
+          val processId = connection.remoteAddress.getPort
+          processId -> JvmExecutor.props(
+            processId,
+            properties, securityManager, config.useDefaultSecurityManager, config.preventShutdownHooks,
+            stdin, config.stdinTimeout, stdout, stderr,
+            in, out,
+            config.exitTimeout, config.outputDrainTimeAtExit,
+            config.processDirPath.resolve(processId.toString)
+          )
+        }
 
-        connection.handleWith(flow)
+        def sendKillOp(jvmExecutor: ActorSelection, signal: Int): Unit =
+          jvmExecutor ! JvmExecutor.SignalProcess(signal)
+
+        connection.handleWith(controlFlow(launchInfoOp, sendKillOp))
       }
+
       system.log.info("Ready.")
 
     case None =>

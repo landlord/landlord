@@ -13,7 +13,7 @@ import org.apache.commons.compress.archivers.ArchiveStreamFactory
 import org.apache.commons.compress.archivers.tar.{ TarArchiveEntry, TarArchiveOutputStream }
 import org.scalatest._
 
-import scala.concurrent.{ ExecutionContext, Future, Promise }
+import scala.concurrent.{ ExecutionContext, Promise }
 import scala.concurrent.duration._
 
 class JvmExecutorSpec extends TestKit(ActorSystem("JvmExecutorSpec"))
@@ -24,60 +24,6 @@ class JvmExecutorSpec extends TestKit(ActorSystem("JvmExecutorSpec"))
   }
 
   implicit val ma: ActorMaterializer = ActorMaterializer()
-
-  "The ProcessParameterParser" should {
-    "produce a flow of ProcessInputParts in the required order given a valid input" in {
-      val cl = "some args"
-
-      val tar = {
-        val bos = new ByteArrayOutputStream()
-        val tos =
-          new ArchiveStreamFactory()
-            .createArchiveOutputStream(ArchiveStreamFactory.TAR, bos)
-            .asInstanceOf[TarArchiveOutputStream]
-        try {
-          tos.flush()
-          tos.finish()
-        } finally {
-          tos.close()
-        }
-        bos.toByteArray
-      }
-
-      val stdinStr = "some stdin\nsome more stdin\n"
-
-      val signal = 15
-
-      val TarRecordSize = 10240
-
-      Source
-        .single(
-          ByteString(cl + "\n") ++
-            ByteString(tar) ++
-            ByteString(stdinStr + "\u0004") ++
-            ByteString.newBuilder.putInt(signal)(ByteOrder.BIG_ENDIAN).result()
-        )
-        .concat(Source.single(ByteString.empty)) // FIXME: This line shouldn't be necessary, but I wonder there's a race condition... possibly, related to https://github.com/akka/akka/issues/23111?
-        .via(new JvmExecutor.ProcessParameterParser)
-        .runFoldAsync(0 -> succeed) {
-          case ((ordinal, _), JvmExecutor.CommandLine(v)) =>
-            Future.successful(1 -> assert(ordinal == 0 && v == cl))
-          case ((ordinal, _), JvmExecutor.Archive(v)) =>
-            val complete = v.runFold(0L)(_ + _.size)
-            complete.map(tarSize => 2 -> assert(ordinal == 1 && tarSize == TarRecordSize))
-          case ((ordinal, _), JvmExecutor.Stdin(v)) =>
-            val complete = v.runFold("")(_ ++ _.utf8String)
-            complete.map(input => 3 -> assert(ordinal == 2 && input == stdinStr))
-          case ((ordinal, _), JvmExecutor.Signal(v)) =>
-            Future.successful(4 -> assert(ordinal == 3 && v == signal))
-        }
-        .map {
-          case (count, Succeeded) if count == 4 => Succeeded
-          case (count, Succeeded)               => assert(count == 4)
-          case (_, lastAssertion)               => lastAssertion
-        }
-    }
-  }
 
   "The Java config" should {
     "Accept just two regular classpath arg and the main class" in {
@@ -134,6 +80,8 @@ class JvmExecutorSpec extends TestKit(ActorSystem("JvmExecutorSpec"))
       val securityManager = new ThreadGroupSecurityManager(System.getSecurityManager)
       System.setSecurityManager(securityManager)
 
+      val processId = 123
+
       val cl = "-cp classes example.Hello"
 
       val tar = {
@@ -177,10 +125,10 @@ class JvmExecutorSpec extends TestKit(ActorSystem("JvmExecutorSpec"))
           List(
             ByteString(cl + "\n") ++
               ByteString(tar) ++
-              ByteString(stdinStr + "\u0004"),
-            ByteString("\u0015")
+              ByteString(stdinStr),
+            ByteString.empty
           )
-        ).throttle(1, 15.seconds.dilated, 1, ThrottleMode.Shaping) // We don't really want this test to receive the signal element, so we delay it.
+        ).throttle(1, 15.seconds.dilated, 1, ThrottleMode.Shaping) // We don't really want this test to give up on stdin, so we delay it.
 
       val out = Promise[Source[ByteString, akka.NotUsed]]()
       val processDirPath = Files.createTempDirectory("jvm-executor-spec")
@@ -188,7 +136,7 @@ class JvmExecutorSpec extends TestKit(ActorSystem("JvmExecutorSpec"))
 
       val process =
         system.actorOf(JvmExecutor.props(
-          "some-process",
+          123,
           properties, securityManager, useDefaultSecurityManager = false, preventShutdownHooks = true,
           stdin, 3.seconds.dilated, stdout, stderr,
           in, out,
@@ -202,8 +150,9 @@ class JvmExecutorSpec extends TestKit(ActorSystem("JvmExecutorSpec"))
             outSource
               .runFold(ByteString.empty)(_ ++ _)
               .map { bytes =>
+                val processIdBytes = bytes.take(4)
                 val (_, _, _, byteStrings) =
-                  bytes.foldLeft((false, 0, 0, List.empty[ByteStringBuilder])) {
+                  bytes.drop(4).foldLeft((false, 0, 0, List.empty[ByteStringBuilder])) {
                     case ((false, 0, 0, bs), b) if b == 'o'.toByte || b == 'e'.toByte =>
                       (true, 0, 0, bs)
                     case ((false, 0, 0, bs), b) if b == 'x'.toByte =>
@@ -222,7 +171,10 @@ class JvmExecutorSpec extends TestKit(ActorSystem("JvmExecutorSpec"))
                   }
                 val outputBytes = byteStrings.dropRight(1).foldLeft(ByteString.empty)(_ ++ _.result)
                 val exitCodeBytes = byteStrings.last.result
-                assert(outputBytes.utf8String == stdinStr && exitCodeBytes.iterator.getInt(ByteOrder.BIG_ENDIAN) == 0)
+                assert(
+                  processIdBytes.iterator.getInt(ByteOrder.BIG_ENDIAN) == processId &&
+                    outputBytes.utf8String == stdinStr &&
+                    exitCodeBytes.iterator.getInt(ByteOrder.BIG_ENDIAN) == 0)
               }
           }(ExecutionContext.Implicits.global) // We use this context to get us off the ScalaTest one (which would hang this)
 
