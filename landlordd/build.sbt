@@ -40,6 +40,16 @@ lazy val daemon = project
       IO.write(versionFile, versionSource)
       Seq(versionFile)
     }.taskValue,
+    // Provide the client classes as resources for our tests
+    resourceGenerators in Test += Def.task {
+      val targetDir = (resourceManaged in Test).value
+      val mappings = {
+        val sourceDir = (classDirectory in Compile in client).value
+        PathFinder(sourceDir).allPaths.pair(Path.rebase(sourceDir, targetDir))
+      }
+      IO.copy(mappings)
+      mappings.map(_._2)
+    }.dependsOn(compile in Compile in client).taskValue,
     // Provide the test classes as resources for our tests
     resourceGenerators in Test += Def.task {
       val targetDir = (resourceManaged in Test).value

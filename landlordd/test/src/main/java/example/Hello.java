@@ -1,6 +1,6 @@
 package example;
 
-import com.github.huntc.landlord.LandlordApp;
+import com.github.huntc.landlord.client.LandlordApp;
 
 import java.io.BufferedReader;
 import java.io.InputStreamReader;

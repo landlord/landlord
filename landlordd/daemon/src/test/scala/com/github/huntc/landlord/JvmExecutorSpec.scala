@@ -97,6 +97,40 @@ class JvmExecutorSpec extends TestKit(ActorSystem("JvmExecutorSpec"))
             tos.closeArchiveEntry()
           }
           {
+            val te = new TarArchiveEntry("classes/com/")
+            tos.putArchiveEntry(te)
+            tos.closeArchiveEntry()
+          }
+          {
+            val te = new TarArchiveEntry("classes/com/github/")
+            tos.putArchiveEntry(te)
+            tos.closeArchiveEntry()
+          }
+          {
+            val te = new TarArchiveEntry("classes/com/github/huntc")
+            tos.putArchiveEntry(te)
+            tos.closeArchiveEntry()
+          }
+          {
+            val te = new TarArchiveEntry("classes/com/github/huntc/landlord")
+            tos.putArchiveEntry(te)
+            tos.closeArchiveEntry()
+          }
+          {
+            val te = new TarArchiveEntry("classes/com/github/huntc/landlord/client")
+            tos.putArchiveEntry(te)
+            tos.closeArchiveEntry()
+          }
+          {
+            val te = new TarArchiveEntry("classes/com/github/huntc/landlord/client/LandlordApp.class")
+            val classFile = Paths.get(getClass.getResource("/com/github/huntc/landlord/client/LandlordApp.class").toURI)
+            val data = Files.readAllBytes(classFile)
+            te.setSize(data.length.toLong)
+            tos.putArchiveEntry(te)
+            tos.write(data)
+            tos.closeArchiveEntry()
+          }
+          {
             val te = new TarArchiveEntry("classes/example/")
             tos.putArchiveEntry(te)
             tos.closeArchiveEntry()
