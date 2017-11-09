@@ -3,6 +3,12 @@ import scalariform.formatter.preferences._
 
 import Dependencies._
 
+lazy val client = project
+  .in(file("client"))
+  .settings(
+    name := "client"
+  )
+
 lazy val daemon = project
   .in(file("daemon"))
   .settings(
@@ -51,12 +57,14 @@ lazy val daemon = project
     dockerExposedPorts := List(9000)
   )
   .enablePlugins(AshScriptPlugin, JavaAppPackaging)
+  .dependsOn(client)
 
 lazy val test = project
   .in(file("test"))
   .settings(
     name := "test"
   )
+  .dependsOn(client)
 
 lazy val root = project
   .in(file("."))
@@ -72,4 +80,4 @@ lazy val root = project
         .setPreference(DanglingCloseParenthesis, Preserve)
     ))
   )
- .aggregate(daemon, test)
+ .aggregate(client, daemon, test)
