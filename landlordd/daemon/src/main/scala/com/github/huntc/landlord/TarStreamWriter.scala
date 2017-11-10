@@ -24,6 +24,8 @@ object TarStreamWriter {
     val BufferSize = 8192
     val MaxBlockingTime = 3.seconds
 
+    rootPath.toFile.mkdirs()
+
     Future {
       val is = new BufferedInputStream(source.runWith(StreamConverters.asInputStream(MaxBlockingTime)))
       try {
