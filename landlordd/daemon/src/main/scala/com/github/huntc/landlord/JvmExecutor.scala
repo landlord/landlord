@@ -148,39 +148,37 @@ class JvmExecutor(
     NotUsed
   }
 
-  override def preStart: Unit = {
-    log.debug("Process actor starting for {}", processId)
-    in
-      .via(new ProcessParameterParser)
-      .runFoldAsync("") {
-        case (_, ProcessParameterParser.CommandLine(value)) =>
-          Future.successful(value)
-        case (cl, ProcessParameterParser.Archive(value)) =>
-          TarStreamWriter
-            .writeTarStream(
-              value,
-              processDirPath,
-              context.system.dispatchers.lookup("akka.actor.default-blocking-io-dispatcher")
-            )
-            .map(_ => cl)
-        case (cl, ProcessParameterParser.Stdin(value)) =>
-          self ! StartProcess(cl, value)
-          Future.successful(cl)
-      }
-      .recover {
-        case e: AbruptStageTerminationException =>
-          // Swallow it up - it is quite normal that our process exits with this stream
-          // still active
-          throw e
-        case NonFatal(e) =>
-          log.error(e, "Error while processing stream")
-          self ! ExitEarly(1, Some(e.getMessage))
-          throw e
-      }
-      .andThen {
-        case _ => self ! SignalProcess(SIGINT)
-      }
-  }
+  log.debug("Process actor starting for {}", processId)
+  in
+    .via(new ProcessParameterParser)
+    .runFoldAsync("") {
+      case (_, ProcessParameterParser.CommandLine(value)) =>
+        Future.successful(value)
+      case (cl, ProcessParameterParser.Archive(value)) =>
+        TarStreamWriter
+          .writeTarStream(
+            value,
+            processDirPath,
+            context.system.dispatchers.lookup("akka.actor.default-blocking-io-dispatcher")
+          )
+          .map(_ => cl)
+      case (cl, ProcessParameterParser.Stdin(value)) =>
+        self ! StartProcess(cl, value)
+        Future.successful(cl)
+    }
+    .recover {
+      case e: AbruptStageTerminationException =>
+        // Swallow it up - it is quite normal that our process exits with this stream
+        // still active
+        throw e
+      case NonFatal(e) =>
+        log.error(e, "Error while processing stream")
+        self ! ExitEarly(1, Some(e.getMessage))
+        throw e
+    }
+    .andThen {
+      case _ => self ! SignalProcess(SIGINT)
+    }
 
   def receive: Receive =
     starting(unstopped = true)
@@ -210,7 +208,7 @@ class JvmExecutor(
 
           // Resolve our process classes
           val classpath = javaConfig.cp.flatMap(cp => resolvePaths(processDirPath, cp).map(_.toUri.toURL))
-          val classLoader = new URLClassLoader(classpath.toArray, this.getClass.getClassLoader.getParent)
+          val classLoader = new URLClassLoader(classpath.toArray, null)
           val classLoaderWeakRef = new WeakReference(classLoader)
           try {
             val cls = classLoader.loadClass(javaConfig.mainClass)
@@ -219,7 +217,7 @@ class JvmExecutor(
             // Launch our "process"
             val stopped = new AtomicBoolean(false)
             val processThreadGroup =
-              new ThreadGroup("process-" + processId) {
+              new ThreadGroup("process-group-" + processId) {
                 override def uncaughtException(t: Thread, e: Throwable): Unit =
                   if (stopped.compareAndSet(false, true)) {
                     val status = e match {
@@ -235,6 +233,8 @@ class JvmExecutor(
                             otherCause.printStackTrace() // General uncaught errors within the process.
                             1
                         }
+                      case ExitException(s) =>
+                        s // It is normal for this exception to occur given that we want the process to explicitly exit
                       case otherException =>
                         System.err.println("An internal error has occurred within landlord. Stacktrace follows.")
                         otherException.printStackTrace()
@@ -283,7 +283,8 @@ class JvmExecutor(
                       if (useDefaultSecurityManager) super.checkPermission(perm, context)
                   })
                   meth.invoke(null, javaConfig.mainArgs.toArray.asInstanceOf[Object])
-                }: Runnable
+                }: Runnable,
+                "main-process-" + processId
               )
 
             out.success(
@@ -303,6 +304,7 @@ class JvmExecutor(
                 .watchTermination()(stopSelfWhenDone)
             )
 
+            processThread.setContextClassLoader(classLoader)
             processThread.start()
 
             context.become(started(cls, processThreadGroup, exitStatusPromise))
@@ -334,7 +336,7 @@ class JvmExecutor(
 
   def started(mainClass: Class[_], processThreadGroup: ThreadGroup, exitStatusPromise: Promise[Int]): Receive = {
     case SignalProcess(signal) =>
-      if (!exitStatusPromise.isCompleted) {
+      if (!exitStatusPromise.isCompleted && !processThreadGroup.isDestroyed) {
         new Thread(
           processThreadGroup, { () =>
           try {
