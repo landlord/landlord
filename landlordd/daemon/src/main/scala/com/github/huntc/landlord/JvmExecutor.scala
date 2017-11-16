@@ -72,6 +72,15 @@ object JvmExecutor {
     arg[String]("main args").optional().unbounded().action { (x, c) =>
       c.copy(mainArgs = c.mainArgs :+ x)
     }
+
+    override def terminate(exitState: Either[String, Unit]): Unit =
+      ()
+  }
+
+  private[landlord] def splitMainArgs(commandLineArgs: Array[String]): (Array[String], Array[String]) = {
+    val parseArgs = commandLineArgs.takeWhile(_ != "--")
+    val mainArgs = commandLineArgs.diff(parseArgs).dropWhile(_ == "--")
+    (parseArgs, mainArgs)
   }
 
   private[landlord] def resolvePaths(base: Path, relpath: Path): Seq[Path] =
@@ -188,7 +197,8 @@ class JvmExecutor(
       val errCapture = new BoundedByteArrayOutputStream
       val commandLineArgs = commandLine.split(" ")
       Console.withErr(errCapture) {
-        parser.parse(commandLineArgs, JavaConfig())
+        val (parseArgs, mainArgs) = splitMainArgs(commandLineArgs)
+        parser.parse(parseArgs, JavaConfig(mainArgs = mainArgs))
       } match {
         case Some(javaConfig) =>
           // Setup stdio streaming

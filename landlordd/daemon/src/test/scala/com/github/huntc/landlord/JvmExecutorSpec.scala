@@ -45,6 +45,12 @@ class JvmExecutorSpec extends TestKit(ActorSystem("JvmExecutorSpec"))
       val parsed = JvmExecutor.parser.parse(List("mainclass", "mainarg0", "mainarg1"), JvmExecutor.JavaConfig())
       assert(parsed.contains(JvmExecutor.JavaConfig(List.empty, "mainclass", List("mainarg0", "mainarg1"))))
     }
+
+    "Return the main class, main options and args" in {
+      val (parseArgs, mainArgs) = JvmExecutor.splitMainArgs(Array("mainclass", "mainarg0", "--", "-o", "mainopt0"))
+      val parsed = JvmExecutor.parser.parse(parseArgs, JvmExecutor.JavaConfig(mainArgs = mainArgs))
+      assert(parsed.contains(JvmExecutor.JavaConfig(List.empty, "mainclass", List("-o", "mainopt0", "mainarg0"))))
+    }
   }
 
   "The classpath resolver" should {
