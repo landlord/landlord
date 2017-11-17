@@ -12,6 +12,7 @@ lazy val daemon = project
       akkSlf4j,
       commonsCompress,
       logbackClassic,
+      jnrUnixSocket,
       scopt,
       akkaTestKit % Test,
       scalaTest % Test

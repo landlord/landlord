@@ -134,7 +134,7 @@ class JvmExecutorSpec extends TestKit(ActorSystem("JvmExecutorSpec"))
               ByteString(stdinStr),
             ByteString.empty
           )
-        ).throttle(1, 15.seconds.dilated, 1, ThrottleMode.Shaping) // We don't really want this test to give up on stdin, so we delay it.
+        ).throttle(1, 15.seconds.dilated, 1, ThrottleMode.Shaping) // We don't want this test to give up on stdin, so we delay it.
 
       val out = Promise[Source[ByteString, akka.NotUsed]]()
       val processDirPath = Files.createTempDirectory("jvm-executor-spec")

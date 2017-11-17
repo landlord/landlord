@@ -5,6 +5,7 @@ object Versions {
   lazy val akka = "2.5.6"
   lazy val commonsCompress = "1.14"
   lazy val logbackClassic = "1.2.3"
+  lazy val jnr = "0.18"
   lazy val scalaTest = "3.0.3"
   lazy val scopt = "3.7.0"
 }
@@ -15,6 +16,7 @@ object Dependencies {
   lazy val akkaTestKit = "com.typesafe.akka" %% "akka-testkit" % Versions.akka
   lazy val commonsCompress = "org.apache.commons" % "commons-compress" % Versions.commonsCompress
   lazy val logbackClassic = "ch.qos.logback" % "logback-classic" % Versions.logbackClassic
+  lazy val jnrUnixSocket = "com.github.jnr" % "jnr-unixsocket" % "0.18"
   lazy val scalaTest = "org.scalatest" %% "scalatest" % Versions.scalaTest
   lazy val scopt = "com.github.scopt" %% "scopt" % Versions.scopt
 }

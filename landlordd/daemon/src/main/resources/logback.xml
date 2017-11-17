@@ -24,6 +24,11 @@
         <appender-ref ref="file"/>
     </logger>
 
+    <logger name="akka.actor" level="debug" additivity="false">
+        <appender-ref ref="console"/>
+        <appender-ref ref="file"/>
+    </logger>
+
     <root level="${root.loglevel:-info}">
         <appender-ref ref="console"/>
         <appender-ref ref="file"/>

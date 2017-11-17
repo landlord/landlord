@@ -236,18 +236,20 @@ class JvmExecutor(
                           case ExitException(s) =>
                             s // It is normal for this exception to occur given that we want the process to explicitly exit
                           case null =>
-                            System.err.println("An invocation error cause is unexpectedly null. Stacktrace follows.")
-                            ite.printStackTrace() // Shouldn't happen in the context of an invocation error.
+                            stderr.fallback.println(s"An invocation error cause is unexpectedly null for process $processId. Process is likely to continue to run. Stacktrace follows.")
+                            ite.printStackTrace(stderr.fallback) // Shouldn't happen in the context of an invocation error.
                             1
                           case otherCause =>
+                            stderr.fallback.println(s"An uncaught error for process $processId. Process is likely to continue to run. Stacktrace follows.")
+                            otherCause.printStackTrace(stderr.fallback)
                             otherCause.printStackTrace() // General uncaught errors within the process.
                             1
                         }
                       case ExitException(s) =>
                         s // It is normal for this exception to occur given that we want the process to explicitly exit
                       case otherException =>
-                        System.err.println("An internal error has occurred within landlord. Stacktrace follows.")
-                        otherException.printStackTrace()
+                        stderr.fallback.println(s"An internal error has occurred within landlord given process $processId. Process is likely to continue to run. Stacktrace follows.")
+                        otherException.printStackTrace(stderr.fallback)
                         70 // EXIT_SOFTWARE, Internal Software Error as defined in BSD sysexits.h
                     }
                     stdin.destroy()
@@ -361,11 +363,10 @@ class JvmExecutor(
           if (signal == SIGINT || signal == SIGTERM) {
             val activeCount = processThreadGroup.activeCount()
             if (activeCount > 0) {
-              log.warning("Interrupting process {} after {} as there are {} threads still running - check that your `trap` handler is functioning correctly", processId, exitTimeout, activeCount)
-              processThreadGroup.interrupt()
+              log.warning("Process {} after {} as there are {} threads still running - check that your `trap` handler is functioning correctly", processId, exitTimeout, activeCount)
             }
             if (!exitStatusPromise.isCompleted) {
-              log.error("Your process {} has not called `System.exit` after {} - all processes must call System.exit even with 0 so that they can be unloaded", processId, exitTimeout)
+              log.error("Process {} has not called `System.exit` after {} - all processes must call System.exit even with 0 so that they can be unloaded", processId, exitTimeout)
             }
           }
         })

@@ -2,6 +2,7 @@ package com.github.huntc.landlord
 
 import java.io.ByteArrayOutputStream
 
+import akka.Done
 import akka.actor.ActorSystem
 import akka.stream.scaladsl.Source
 import akka.stream.ActorMaterializer
@@ -11,7 +12,7 @@ import org.apache.commons.compress.archivers.ArchiveStreamFactory
 import org.apache.commons.compress.archivers.tar.TarArchiveOutputStream
 import org.scalatest._
 
-import scala.concurrent.Future
+import scala.concurrent.{ Future, Promise }
 
 class ProcessParameterParserSpec extends TestKit(ActorSystem("ProcessParameterParserSpec"))
   with AsyncWordSpecLike with Matchers with BeforeAndAfterAll {
@@ -45,12 +46,14 @@ class ProcessParameterParserSpec extends TestKit(ActorSystem("ProcessParameterPa
 
       val TarRecordSize = 10240
 
+      val emittedEnough = Promise[Done]
       Source
         .single(
           ByteString(cl + "\n") ++
             ByteString(tar) ++
             ByteString(stdinStr)
         )
+        .merge(Source.fromFuture(emittedEnough.future).map(_ => ByteString.empty))
         .via(new ProcessParameterParser)
         .runFoldAsync(0 -> succeed) {
           case ((ordinal, _), ProcessParameterParser.CommandLine(v)) =>
@@ -59,7 +62,13 @@ class ProcessParameterParserSpec extends TestKit(ActorSystem("ProcessParameterPa
             val complete = v.runFold(0L)(_ + _.size)
             complete.map(tarSize => 2 -> assert(ordinal == 1 && tarSize == TarRecordSize))
           case ((ordinal, _), ProcessParameterParser.Stdin(v)) =>
-            val complete = v.runFold("")(_ ++ _.utf8String)
+            val complete = v.runFold("") {
+              case (left, right) =>
+                if (right.utf8String == stdinStr) {
+                  emittedEnough.success(Done)
+                }
+                left ++ right.utf8String
+            }
             complete.map(input => 3 -> assert(ordinal == 2 && input == stdinStr))
         }
         .map {
