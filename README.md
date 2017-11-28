@@ -149,4 +149,11 @@ x
 
 The bash script expects you to just hit return to end sending stdin.
 
+Profiling tooling is gratefully donated by YourKit LLC ![logo](https://www.yourkit.com/images/yklogo.png)
+
+_YourKit supports open source projects with its full-featured Java Profiler.
+YourKit, LLC is the creator of <a href="https://www.yourkit.com/java/profiler/">YourKit Java Profiler</a>
+and <a href="https://www.yourkit.com/.net/profiler/">YourKit .NET Profiler</a>,
+innovative and intelligent tools for profiling Java and .NET applications._
+
 (c)opyright 2017, Christopher Hunt
