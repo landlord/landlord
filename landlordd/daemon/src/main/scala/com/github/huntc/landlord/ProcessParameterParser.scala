@@ -77,7 +77,7 @@ class ProcessParameterParser(implicit mat: ActorMaterializer, ec: ExecutionConte
       def becomeReceiveTar(): Unit = {
         val (queue, ar) =
           Source
-            .queue[ByteString](100, OverflowStrategy.backpressure)
+            .queue[ByteString](2, OverflowStrategy.backpressure)
             .prefixAndTail(0)
             .map {
               case (_, arIn) => arIn
@@ -115,6 +115,7 @@ class ProcessParameterParser(implicit mat: ActorMaterializer, ec: ExecutionConte
           if (!isClosed(in)) {
             if (!hasBeenPulled(in)) pull(in)
           } else {
+            queue.complete()
             failStage(new UnexpectedEOS("archive"))
           }
           become(receiveTar(queue, enqueueRecordBuffer))
@@ -142,7 +143,7 @@ class ProcessParameterParser(implicit mat: ActorMaterializer, ec: ExecutionConte
       def becomeReceiveStdin(): Unit = {
         val (queue, stdin) =
           Source
-            .queue[ByteString](100, OverflowStrategy.backpressure)
+            .queue[ByteString](2, OverflowStrategy.backpressure)
             .prefixAndTail(0)
             .map {
               case (_, stdinIn) => stdinIn
@@ -166,6 +167,7 @@ class ProcessParameterParser(implicit mat: ActorMaterializer, ec: ExecutionConte
           become(receiveStdinQueuePending(queue, enqueued))
           if (!isClosed(in) && !hasBeenPulled(in)) pull(in)
         } else if (isClosed(in)) {
+          queue.complete()
           completeStage()
           become(receiveFinished())
         }

@@ -2,20 +2,21 @@ package com.github.huntc.landlord
 
 import java.nio.ByteOrder
 
-import akka.NotUsed
-import akka.actor.{ ActorSelection, ActorSystem, Props }
-import akka.stream.scaladsl.{ Flow, Sink, Source, Tcp }
+import akka.{ Done, NotUsed }
+import akka.actor.{ ActorSelection, ActorSystem, CoordinatedShutdown, Props }
+import akka.stream.scaladsl.{ Flow, Keep, Sink, Source }
 import akka.stream.{ ActorMaterializer, Materializer }
 import akka.util.ByteString
 import java.nio.file.{ Files, Path, Paths }
+import java.util.concurrent.atomic.AtomicInteger
 
 import scala.concurrent.Promise
 import scala.concurrent.duration._
+import scala.util.{ Failure, Success }
 
 object Main extends App {
   case class Config(
-      bindIp: String = "127.0.0.1",
-      bindPort: Int = 9000,
+      bindDirPath: Path = Paths.get("/var/run/landlord"),
       exitTimeout: FiniteDuration = 12.seconds,
       preventShutdownHooks: Boolean = false,
       outputDrainTimeAtExit: FiniteDuration = 100.milliseconds,
@@ -28,13 +29,9 @@ object Main extends App {
     head(Version.executableScriptName, Version.current)
     note("Daemon for sharing JVM memory between JVM processes - used with a client as a substitute for the `java` command")
 
-    opt[String]("bind-ip").action { (x, c) =>
-      c.copy(bindIp = x)
-    }.text("The IP address to listen on.")
-
-    opt[Int]("bind-port").action { (x, c) =>
-      c.copy(bindPort = x)
-    }.text("The port to listen on")
+    opt[String]("bind-dir-path").action { (x, c) =>
+      c.copy(bindDirPath = Paths.get(x))
+    }.text("The Unix Domain Socket path to listen on.")
 
     opt[String]("exit-timeout").action { (x, c) =>
       c.copy(
@@ -139,28 +136,49 @@ object Main extends App {
       implicit val system: ActorSystem = ActorSystem("landlordd")
       implicit val mat: Materializer = ActorMaterializer()
 
-      Tcp().bind(config.bindIp, config.bindPort).runForeach { connection =>
-        system.log.info("New connection from {}", connection.remoteAddress)
+      val nextProcessId = new AtomicInteger(0)
 
-        def launchInfoOp(in: Source[ByteString, NotUsed], out: Promise[Source[ByteString, NotUsed]]): (Int, Props) = {
-          val processId = connection.remoteAddress.getPort
-          processId -> JvmExecutor.props(
-            processId,
-            properties, securityManager, config.useDefaultSecurityManager, config.preventShutdownHooks,
-            stdin, config.stdinTimeout, stdout, stderr,
-            in, out,
-            config.exitTimeout, config.outputDrainTimeAtExit,
-            config.processDirPath.resolve(processId.toString)
-          )
+      val binding =
+        UnixDomainSocket()
+          .bind(config.bindDirPath.resolve("landlordd.sock").toFile)
+          .toMat(Sink.foreach { connection =>
+            system.log.debug("New connection {}", connection)
+
+            def launchInfoOp(in: Source[ByteString, NotUsed], out: Promise[Source[ByteString, NotUsed]]): (Int, Props) = {
+              val processId = nextProcessId.getAndIncrement()
+              processId -> JvmExecutor.props(
+                processId,
+                properties, securityManager, config.useDefaultSecurityManager, config.preventShutdownHooks,
+                stdin, config.stdinTimeout, stdout, stderr,
+                in, out,
+                config.exitTimeout, config.outputDrainTimeAtExit,
+                config.processDirPath.resolve(processId.toString)
+              )
+            }
+
+            def sendKillOp(jvmExecutor: ActorSelection, signal: Int): Unit =
+              jvmExecutor ! JvmExecutor.SignalProcess(signal)
+
+            connection.handleWith(controlFlow(launchInfoOp, sendKillOp))
+
+          })(Keep.left)
+          .run
+
+      import system.dispatcher
+
+      binding
+        .onComplete {
+          case Success(_) =>
+            system.log.info("Ready.")
+          case Failure(e) =>
+            system.log.error(e, "Exiting")
+            system.terminate()
         }
 
-        def sendKillOp(jvmExecutor: ActorSelection, signal: Int): Unit =
-          jvmExecutor ! JvmExecutor.SignalProcess(signal)
-
-        connection.handleWith(controlFlow(launchInfoOp, sendKillOp))
-      }
-
-      system.log.info("Ready.")
+      CoordinatedShutdown(system).addTask(
+        CoordinatedShutdown.PhaseServiceUnbind, "unbindUnixDomainSocket") { () =>
+          binding.flatMap(_.unbind().map(_ => Done))
+        }
 
     case None =>
     // arguments are bad, error message will have been displayed

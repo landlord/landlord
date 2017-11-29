@@ -12,7 +12,12 @@ import scala.concurrent.duration._
 import scala.annotation.tailrec
 
 /**
- * Functions to write out tar streams
+ * Functions to write out tar streams.
+ *
+ * TarArchiveInputStream doesn't appear to be very fast in conjunction with its dependency
+ * on InputStream. We could probably improve performance drammatically if we eliminated
+ * both from the picture I wrote our own tar stream parser. I'm unsure if it is worth it
+ * right now though.
  */
 object TarStreamWriter {
   private[landlord] def writeTarStream(
@@ -21,17 +26,22 @@ object TarStreamWriter {
     blockingEc: ExecutionContext
   )(implicit mat: Materializer): Future[Unit] = {
 
-    val BufferSize = 8192
-    val MaxBlockingTime = 3.seconds
+    val TarBlocksize = 512
+    val TarBlockingFactor = 20
+    val TarBufferSize = TarBlocksize * TarBlockingFactor * 2
+    val TarInputMaxBlockingTime = 3.seconds
+
+    val FileBufferSize = 8192
 
     rootPath.toFile.mkdirs()
 
     Future {
-      val is = new BufferedInputStream(source.runWith(StreamConverters.asInputStream(MaxBlockingTime)))
+      val is =
+        new BufferedInputStream(source.runWith(StreamConverters.asInputStream(TarInputMaxBlockingTime)), TarBufferSize)
       try {
         val tarInput = new ArchiveStreamFactory().createArchiveInputStream(is).asInstanceOf[TarArchiveInputStream]
         try {
-          val buffer = Array.ofDim[Byte](BufferSize)
+          val tarInputBuffer = Array.ofDim[Byte](TarBufferSize)
           blocking {
             @tailrec def foreachTarEntry(op: TarArchiveEntry => Unit): Unit =
               tarInput.getNextTarEntry match {
@@ -46,19 +56,19 @@ object TarStreamWriter {
               if (entry.isDirectory) {
                 path.toFile.mkdirs()
               } else {
-                val os = new BufferedOutputStream(Files.newOutputStream(path))
+                val os = new BufferedOutputStream(Files.newOutputStream(path), FileBufferSize)
                 try {
-                  @tailrec def foreachRead(offset: Int)(op: Array[Byte] => Unit): Unit = {
-                    val remaining = buffer.length - offset
+                  @tailrec def foreachRead(offset: Int)(writeOp: (Array[Byte], Int, Int) => Unit): Unit = {
+                    val remaining = FileBufferSize - offset
                     if (remaining > 0) {
-                      val read = tarInput.read(buffer, offset, remaining)
+                      val read = tarInput.read(tarInputBuffer, offset, remaining)
                       if (read > -1)
-                        foreachRead(offset + read)(op)
+                        foreachRead(offset + read)(writeOp)
                       else
-                        op(buffer.take(offset))
+                        writeOp(tarInputBuffer, 0, offset)
                     } else {
-                      op(buffer)
-                      foreachRead(0)(op)
+                      writeOp(tarInputBuffer, 0, FileBufferSize)
+                      foreachRead(0)(writeOp)
                     }
                   }
                   foreachRead(0)(os.write)
