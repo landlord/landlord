@@ -3,7 +3,8 @@ package com.github.huntc.landlord
 import java.nio.ByteOrder
 
 import akka.{ Done, NotUsed }
-import akka.actor.{ ActorSelection, ActorSystem, CoordinatedShutdown, Props }
+import akka.actor.{ Actor, ActorRef, ActorSelection, ActorSystem, CoordinatedShutdown, Props, Terminated }
+import akka.pattern.ask
 import akka.stream.scaladsl.{ Flow, Keep, Sink, Source }
 import akka.stream.{ ActorMaterializer, Materializer }
 import akka.util.ByteString
@@ -73,7 +74,59 @@ object Main extends App {
     }.text("When true, the JVM's default security manager will be used for processes. The option defaults to false.")
   }
 
+  object JvmExecutorReaper {
+    def props: Props =
+      Props(new JvmExecutorReaper)
+
+    /**
+     * Register an actor to be retained for reaping.
+     */
+    case class Register(actor: ActorRef)
+
+    /**
+     * Shutdown all registered executors. The message is replied to with a Done when complete.
+     */
+    case object Shutdown
+  }
+
+  /**
+   * A JvmExecutorReaper allows executors to be registered and then subsequently shutdown gracefully in bulk.
+   * The registered actors are also watched and are automatically de-registered when they terminated.
+   */
+  class JvmExecutorReaper extends Actor {
+    import JvmExecutorReaper._
+
+    override def receive: Receive =
+      registering(List.empty)
+
+    private def registering(actors: List[ActorRef]): Receive = {
+      case Register(actor) =>
+        context.become(registering(context.watch(actor) +: actors))
+      case Terminated(actor) =>
+        context.become(registering(actors.filterNot(_ == actor)))
+      case Shutdown if actors.isEmpty =>
+        sender() ! Done
+      case Shutdown =>
+        actors.foreach(_ ! JvmExecutor.SignalProcess(JvmExecutor.SIGTERM))
+        context.become(shuttingDown(actors, sender()))
+    }
+
+    private def shuttingDown(actors: List[ActorRef], replyTo: ActorRef): Receive = {
+      case Register(actor) =>
+        actors.foreach(_ ! JvmExecutor.SignalProcess(JvmExecutor.SIGTERM))
+        context.become(registering(context.watch(actor) +: actors))
+      case _: Terminated if actors.size == 1 =>
+        replyTo ! Done
+      case Terminated(actor) =>
+        context.become(registering(actors.filterNot(_ == actor)))
+      case Shutdown =>
+    }
+  }
+
+  private final val ProcessIDPrefix = "process-"
+
   def controlFlow(
+    reaper: ActorRef,
     launchInfoOp: (Source[ByteString, NotUsed], Promise[Source[ByteString, NotUsed]]) => (Int, Props),
     sendKillOp: (ActorSelection, Int) => Unit
   )(implicit system: ActorSystem, mat: Materializer): Flow[ByteString, ByteString, NotUsed] =
@@ -87,7 +140,8 @@ object Main extends App {
               val in = Source.single(firstBytes.drop(1)).concat(tail)
               val out = Promise[Source[ByteString, NotUsed]]()
               val (processId, jvmExecutorProps) = launchInfoOp(in, out)
-              system.actorOf(jvmExecutorProps, processId.toString)
+              val jvmExecutor = system.actorOf(jvmExecutorProps, ProcessIDPrefix + processId)
+              reaper ! JvmExecutorReaper.Register(jvmExecutor)
               Source.fromFutureSource(out.future)
             case Some(firstBytes) if firstBytes.iterator.getByte == 'k' =>
               Source
@@ -105,7 +159,7 @@ object Main extends App {
                 }
                 .runForeach {
                   case (processId, signal) =>
-                    sendKillOp(system.actorSelection(system.child(processId.toString)), signal)
+                    sendKillOp(system.actorSelection(system.child(ProcessIDPrefix + processId)), signal)
                 }
               Source.empty[ByteString]
             case _ =>
@@ -138,6 +192,8 @@ object Main extends App {
 
       val nextProcessId = new AtomicInteger(0)
 
+      val reaper = system.actorOf(JvmExecutorReaper.props, "reaper")
+
       val binding =
         UnixDomainSocket()
           .bind(config.bindDirPath.resolve("landlordd.sock").toFile)
@@ -159,7 +215,7 @@ object Main extends App {
             def sendKillOp(jvmExecutor: ActorSelection, signal: Int): Unit =
               jvmExecutor ! JvmExecutor.SignalProcess(signal)
 
-            connection.handleWith(controlFlow(launchInfoOp, sendKillOp))
+            connection.handleWith(controlFlow(reaper, launchInfoOp, sendKillOp))
 
           })(Keep.left)
           .run
@@ -173,6 +229,12 @@ object Main extends App {
           case Failure(e) =>
             system.log.error(e, "Exiting")
             system.terminate()
+        }
+
+      CoordinatedShutdown(system).addTask(
+        CoordinatedShutdown.PhaseBeforeActorSystemTerminate, "stopJvmExecutors") { () =>
+          reaper.ask(JvmExecutorReaper.Shutdown)(config.exitTimeout)
+            .mapTo[Done]
         }
 
       CoordinatedShutdown(system).addTask(

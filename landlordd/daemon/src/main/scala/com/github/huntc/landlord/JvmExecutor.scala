@@ -1,7 +1,7 @@
 package com.github.huntc.landlord
 
 import akka.NotUsed
-import akka.actor.{ Actor, ActorLogging, PoisonPill, Props }
+import akka.actor.{ Actor, ActorLogging, PoisonPill, Props, Timers }
 import akka.pattern.pipe
 import akka.util.ByteString
 import akka.stream._
@@ -43,6 +43,7 @@ object JvmExecutor {
 
   case class StartProcess(commandLine: String, stdin: Source[ByteString, AnyRef])
   case class SignalProcess(signal: Int)
+  private case object StopSignalCheck
 
   private[landlord] class BoundedByteArrayOutputStream extends ByteArrayOutputStream {
     val MaxOutputSize = 8192
@@ -145,7 +146,7 @@ class JvmExecutor(
     in: Source[ByteString, NotUsed], out: Promise[Source[ByteString, NotUsed]],
     exitTimeout: FiniteDuration, outputDrainTimeAtExit: FiniteDuration,
     processDirPath: Path
-) extends Actor with ActorLogging {
+) extends Actor with ActorLogging with Timers {
 
   import JvmExecutor._
 
@@ -359,18 +360,16 @@ class JvmExecutor(
           }
         }: Runnable
         ).start()
-        context.system.scheduler.scheduleOnce(exitTimeout, { () =>
-          if (signal == SIGINT || signal == SIGTERM) {
-            val activeCount = processThreadGroup.activeCount()
-            if (activeCount > 0) {
-              log.warning("Process {} after {} as there are {} threads still running - check that your `trap` handler is functioning correctly", processId, exitTimeout, activeCount)
-            }
-            if (!exitStatusPromise.isCompleted) {
-              log.error("Process {} has not called `System.exit` after {} - all processes must call System.exit even with 0 so that they can be unloaded", processId, exitTimeout)
-            }
-          }
-        })
+        if (signal == SIGINT || signal == SIGTERM)
+          timers.startSingleTimer("signalCheck", StopSignalCheck, exitTimeout)
       }
+
+    case StopSignalCheck =>
+      val activeCount = processThreadGroup.activeCount()
+      if (activeCount > 0)
+        log.warning("Process {} after {} as there are {} threads still running - check that your `trap` handler is functioning correctly", processId, exitTimeout, activeCount)
+      if (!exitStatusPromise.isCompleted)
+        log.error("Process {} has not called `System.exit` after {} - all processes must call System.exit even with 0 so that they can be unloaded", processId, exitTimeout)
   }
 
   override def postStop(): Unit =

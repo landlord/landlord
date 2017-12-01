@@ -13,7 +13,9 @@ public class Hello {
         }
 
         BufferedReader br = new BufferedReader(new InputStreamReader(System.in));
-        System.out.println(br.readLine());
+        String line = br.readLine();
+        if (line != null) System.out.println(line);
+
         System.exit(0);
     }
 
