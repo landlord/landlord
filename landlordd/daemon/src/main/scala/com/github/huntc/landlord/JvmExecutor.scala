@@ -12,7 +12,6 @@ import java.net.URLClassLoader
 import java.nio.ByteOrder
 import java.nio.file.{ Files, Path, Paths }
 import java.security.Permission
-import java.util.concurrent.atomic.AtomicBoolean
 import java.util.Properties
 
 import scala.collection.JavaConverters._
@@ -98,6 +97,7 @@ object JvmExecutor {
 
   private[landlord] case class ExitEarly(exitStatus: Int, errorMessage: Option[String])
 
+  private[landlord] val SIGABRT = 6
   private[landlord] val SIGINT = 2
   private[landlord] val SIGTERM = 15
 
@@ -226,44 +226,56 @@ class JvmExecutor(
             val meth = cls.getMethod("main", classOf[Array[String]])
 
             // Launch our "process"
-            val stopped = new AtomicBoolean(false)
+            @volatile var stopped = false
             val processThreadGroup =
               new ThreadGroup("process-group-" + processId) {
-                override def uncaughtException(t: Thread, e: Throwable): Unit =
-                  if (stopped.compareAndSet(false, true)) {
-                    val status = e match {
+                override def uncaughtException(t: Thread, e: Throwable): Unit = {
+                  val check = synchronized {
+                    val result = e match {
                       case ite: InvocationTargetException =>
                         ite.getCause match {
-                          case ExitException(s) =>
-                            s // It is normal for this exception to occur given that we want the process to explicitly exit
+                          case ExitException(s) if !stopped =>
+                            Some(s) // It is normal for this exception to occur given that we want the process to explicitly exit
                           case null =>
-                            stderr.fallback.println(s"An invocation error cause is unexpectedly null for process $processId. Process is likely to continue to run. Stacktrace follows.")
-                            ite.printStackTrace(stderr.fallback) // Shouldn't happen in the context of an invocation error.
-                            1
+                            stderr.fallback.println(s"An unexpected exception with a null cause has occurred within landlord given process $processId. Stacktrace follows.")
+                            ite.printStackTrace(stderr.fallback)
+                            stderr.println("Something went wrong - see Landlord's log")
+                            Some(70) // EXIT_SOFTWARE, Internal Software Error as defined in BSD sysexits.h
                           case otherCause =>
-                            stderr.fallback.println(s"An uncaught error for process $processId. Process is likely to continue to run. Stacktrace follows.")
-                            otherCause.printStackTrace(stderr.fallback)
-                            otherCause.printStackTrace() // General uncaught errors within the process.
-                            1
+                            val msg = s"An uncaught error for process $processId. Stacktrace follows. The process will continue to run unless System.exit is called."
+                            stderr.fallback.println(msg)
+                            otherCause.printStackTrace(stderr.fallback) // General uncaught errors within the process.
+                            stderr.println(msg)
+                            otherCause.printStackTrace()
+                            None
                         }
-                      case ExitException(s) =>
-                        s // It is normal for this exception to occur given that we want the process to explicitly exit
+                      case ExitException(s) if !stopped =>
+                        Some(s) // It is normal for this exception to occur given that we want the process to explicitly exit
                       case otherException =>
-                        stderr.fallback.println(s"An internal error has occurred within landlord given process $processId. Process is likely to continue to run. Stacktrace follows.")
+                        stderr.fallback.println(s"An internal error has occurred within landlord given process $processId. Stacktrace follows.")
                         otherException.printStackTrace(stderr.fallback)
-                        70 // EXIT_SOFTWARE, Internal Software Error as defined in BSD sysexits.h
+                        stderr.println("Something went wrong - see Landlord's log")
+                        Some(70) // EXIT_SOFTWARE, Internal Software Error as defined in BSD sysexits.h
                     }
-                    stdin.destroy()
-                    stdout.destroy()
-                    stderr.destroy()
-                    properties.destroy()
-                    securityManager.destroy()
-                    Thread.sleep(outputDrainTimeAtExit.toMillis)
-                    stdoutPos.close()
-                    stderrPos.close()
-                    classLoaderWeakRef.get.foreach(_.close())
-                    exitStatusPromise.success(status)
+                    if (result.isDefined) stopped = true
+                    result
                   }
+                  check match {
+                    case Some(status) =>
+                      stdin.destroy()
+                      stdout.destroy()
+                      stderr.destroy()
+                      properties.destroy()
+                      securityManager.destroy()
+                      Thread.sleep(outputDrainTimeAtExit.toMillis)
+                      stdoutPos.close()
+                      stderrPos.close()
+                      classLoaderWeakRef.get.foreach(_.close())
+                      exitStatusPromise.success(status)
+                    case None =>
+                      self ! SignalProcess(SIGABRT)
+                  }
+                }
               }
             processThreadGroup.setDaemon(true)
             val processThread =
@@ -282,8 +294,8 @@ class JvmExecutor(
                     override def checkPermission(perm: Permission): Unit = {
                       if (perm == ShutdownHooksPerm) {
                         val message = """|: Shutdown hooks are not applicable within landlord as many applications reside in the same JVM.
-                                         |Declare a `public static void trap(int signal)` for trapping signals and catch `SecurityException`
-                                         |around your shutdown hook code.""".stripMargin
+                                         |Declare a `public static void trap(int signal)` for trapping signals and ultimately call
+                                         |System.exit to exit.""".stripMargin
                         if (preventShutdownHooks)
                           throw new SecurityException("Error" + message)
                         else
@@ -360,7 +372,7 @@ class JvmExecutor(
           }
         }: Runnable
         ).start()
-        if (signal == SIGINT || signal == SIGTERM)
+        if (signal == SIGABRT || signal == SIGINT || signal == SIGTERM)
           timers.startSingleTimer("signalCheck", StopSignalCheck, exitTimeout)
       }
 
