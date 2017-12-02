@@ -12,6 +12,8 @@ I had also considered just using OSGi. However, OSGi appears to have failed to c
 
 [AOT](http://openjdk.java.net/jeps/295) with dead code elimination could also diminish the need for landlord - as the JVM process reduces its memory footprint toward that of native languages such as [Go](https://golang.org/). So perhaps landlord has a short lifespan in this regard; doubly important then that the impact of landlord on the programmer is minimal in order to faciliate potential future migrations.
 
+[IBM's J9 JRE](https://www.ibm.com/support/knowledgecenter/en/SSYKE2_7.0.0/com.ibm.java.lnx.70.doc/user/java_jvm.html) (which [OpenJ9](https://www.eclipse.org/openj9/) is derived from) [provided a multi-tenant JVM in 2013 as a technology preview](https://www.ibm.com/developerworks/library/j-multitenant-java/index.html). This multitenant JVMlooked as though it would fully achieve Landlord's objectives. However, at least with OpenJ9, the multitenancy feature seems to be missing. Please raise an issue on this README if more information can be provided.
+
 ## Why
 JVM programs take up too much resident memory. Back in the day of Java 1.1, a minimal JVM application outputting "Hello world" would take about about 4MiB of resident memory. Nowadays, the same program in Java 8 takes around 35MiB of resident memory i.e. almost 9 times as much! While Java 9's modules and AOT will help reduce the JVM's footprint, there's a lot of commonality between the JRE's of an individual JVM that can be shared.
 
