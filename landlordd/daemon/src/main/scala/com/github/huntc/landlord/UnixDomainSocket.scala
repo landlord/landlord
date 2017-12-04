@@ -58,7 +58,7 @@ object UnixDomainSocket extends ExtensionId[UnixDomainSocket] with ExtensionIdPr
    */
   final case class OutgoingConnection(remoteAddress: UnixSocketAddress, localAddress: UnixSocketAddress)
 
-  private val ReceiveBufferSize = 8192
+  private val ReceiveBufferSize = 65536
   private sealed abstract class ReceiveContext(
       val queue: SourceQueueWithComplete[ByteString],
       val buffer: ByteBuffer
@@ -73,7 +73,7 @@ object UnixDomainSocket extends ExtensionId[UnixDomainSocket] with ExtensionIdPr
       pendingResult: Future[QueueOfferResult]
   ) extends ReceiveContext(queue, buffer)
 
-  private val SendBufferSize = 8192
+  private val SendBufferSize = 65536
   private sealed abstract class SendContext(
       val buffer: ByteBuffer
   )
