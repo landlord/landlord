@@ -26,9 +26,9 @@ object TarStreamWriter {
     blockingEc: ExecutionContext
   )(implicit mat: Materializer): Future[Unit] = {
 
-    val TarBlocksize = 512
+    val TarRecordSize = 512
     val TarBlockingFactor = 20
-    val TarBufferSize = TarBlocksize * TarBlockingFactor * 2
+    val TarBufferSize = TarRecordSize * TarBlockingFactor * 2
     val TarInputMaxBlockingTime = 3.seconds
 
     val FileBufferSize = 8192

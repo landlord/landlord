@@ -8,7 +8,6 @@ import akka.stream.scaladsl.Source
 import akka.stream.ActorMaterializer
 import akka.testkit._
 import akka.util.ByteString
-import org.apache.commons.compress.archivers.ArchiveStreamFactory
 import org.apache.commons.compress.archivers.tar.TarArchiveOutputStream
 import org.scalatest._
 
@@ -27,12 +26,11 @@ class ProcessParameterParserSpec extends TestKit(ActorSystem("ProcessParameterPa
     "produce a flow of ProcessInputParts in the required order given a valid input" in {
       val cl = "some args"
 
+      val TarBlockSize = 10240
+
       val tar = {
         val bos = new ByteArrayOutputStream()
-        val tos =
-          new ArchiveStreamFactory()
-            .createArchiveOutputStream(ArchiveStreamFactory.TAR, bos)
-            .asInstanceOf[TarArchiveOutputStream]
+        val tos = new TarArchiveOutputStream(bos, TarBlockSize)
         try {
           tos.flush()
           tos.finish()
@@ -43,8 +41,6 @@ class ProcessParameterParserSpec extends TestKit(ActorSystem("ProcessParameterPa
       }
 
       val stdinStr = "some stdin\nsome more stdin\n"
-
-      val TarRecordSize = 10240
 
       val emittedEnough = Promise[Done]
       Source
@@ -60,7 +56,7 @@ class ProcessParameterParserSpec extends TestKit(ActorSystem("ProcessParameterPa
             Future.successful(1 -> assert(ordinal == 0 && v == cl))
           case ((ordinal, _), ProcessParameterParser.Archive(v)) =>
             val complete = v.runFold(0L)(_ + _.size)
-            complete.map(tarSize => 2 -> assert(ordinal == 1 && tarSize == TarRecordSize))
+            complete.map(tarSize => 2 -> assert(ordinal == 1 && tarSize == TarBlockSize))
           case ((ordinal, _), ProcessParameterParser.Stdin(v)) =>
             val complete = v.runFold("") {
               case (left, right) =>

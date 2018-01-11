@@ -9,7 +9,6 @@ import java.io.ByteArrayOutputStream
 import java.nio.ByteOrder
 import java.nio.file.{ Files, Paths }
 
-import org.apache.commons.compress.archivers.ArchiveStreamFactory
 import org.apache.commons.compress.archivers.tar.{ TarArchiveEntry, TarArchiveOutputStream }
 import org.scalatest._
 
@@ -90,12 +89,10 @@ class JvmExecutorSpec extends TestKit(ActorSystem("JvmExecutorSpec"))
 
       val cl = "-cp classes example.Hello"
 
+      val TarBlockSize = 10240
       val tar = {
         val bos = new ByteArrayOutputStream()
-        val tos =
-          new ArchiveStreamFactory()
-            .createArchiveOutputStream(ArchiveStreamFactory.TAR, bos)
-            .asInstanceOf[TarArchiveOutputStream]
+        val tos = new TarArchiveOutputStream(bos, TarBlockSize)
         try {
           {
             val te = new TarArchiveEntry("classes/")

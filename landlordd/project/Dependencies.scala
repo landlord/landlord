@@ -3,7 +3,7 @@ import sbt.Resolver.bintrayRepo
 
 object Versions {
   lazy val akka = "2.5.8"
-  lazy val commonsCompress = "1.14"
+  lazy val commonsCompress = "1.15"
   lazy val logbackClassic = "1.2.3"
   lazy val jnr = "0.18"
   lazy val scalaTest = "3.0.4"

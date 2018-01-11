@@ -88,29 +88,29 @@ class ProcessParameterParser(implicit mat: ActorMaterializer, ec: ExecutionConte
         become(receiveTar(queue, ByteString.empty))
       }
 
-      private val Blocksize = 512
-      private val Eotsize = Blocksize * 2
+      private val RecordSize = 512
+      private val Eotsize = RecordSize * 2
       private val BlockingFactor = 20
-      private val RecordSize = Blocksize * BlockingFactor
-      assert(RecordSize >= Eotsize)
+      private val BlockSize = RecordSize * BlockingFactor
+      assert(BlockSize >= Eotsize)
 
       def receiveTar(
         queue: SourceQueueWithComplete[ByteString],
-        recordBuffer: ByteString)(bytes: ByteString): ByteString = {
+        blockBuffer: ByteString)(bytes: ByteString): ByteString = {
 
-        val remaining = RecordSize - recordBuffer.size
+        val remaining = BlockSize - blockBuffer.size
         val (add, carry) = bytes.splitAt(remaining)
-        val enqueueRecordBuffer = recordBuffer ++ add
-        if (enqueueRecordBuffer.size == RecordSize) {
+        val enqueueBlockBuffer = blockBuffer ++ add
+        if (enqueueBlockBuffer.size == BlockSize) {
           val enqueued = new AtomicBoolean(false)
-          queue.offer(enqueueRecordBuffer).andThen {
+          queue.offer(enqueueBlockBuffer).andThen {
             case Success(QueueOfferResult.Enqueued) =>
               enqueued.compareAndSet(false, true)
               asyncReceive.invoke(())
             case _ =>
               asyncCancel.invoke(())
           }
-          become(receiveTarQueuePending(queue, enqueueRecordBuffer, enqueued))
+          become(receiveTarQueuePending(queue, enqueueBlockBuffer, enqueued))
         } else {
           if (!isClosed(in)) {
             if (!hasBeenPulled(in)) pull(in)
@@ -118,18 +118,18 @@ class ProcessParameterParser(implicit mat: ActorMaterializer, ec: ExecutionConte
             queue.complete()
             failStage(new UnexpectedEOS("archive"))
           }
-          become(receiveTar(queue, enqueueRecordBuffer))
+          become(receiveTar(queue, enqueueBlockBuffer))
         }
         carry
       }
 
       def receiveTarQueuePending(
         queue: SourceQueueWithComplete[ByteString],
-        recordBuffer: ByteString,
+        blockBuffer: ByteString,
         enqueued: AtomicBoolean)(bytes: ByteString): ByteString = {
 
         if (enqueued.get()) {
-          if (recordBuffer.takeRight(Eotsize).forall(_ == 0)) {
+          if (blockBuffer.takeRight(Eotsize).forall(_ == 0)) {
             queue.complete()
             becomeReceiveStdin()
           } else {
