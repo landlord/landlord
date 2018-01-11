@@ -72,6 +72,14 @@ object Main extends App {
     opt[Boolean]("use-default-security-manager").action { (x, c) =>
       c.copy(useDefaultSecurityManager = x)
     }.text("When true, the JVM's default security manager will be used for processes. The option defaults to false.")
+
+    checkConfig { c =>
+      val bindDirFile = c.bindDirPath.toFile
+      if (bindDirFile.exists && bindDirFile.canWrite)
+        Right(())
+      else
+        Left("Unix socket directory must exist with write permission: " + c.bindDirPath)
+    }
   }
 
   object JvmExecutorReaper {
@@ -115,7 +123,7 @@ object Main extends App {
       case Register(actor) =>
         actors.foreach(_ ! JvmExecutor.SignalProcess(JvmExecutor.SIGTERM))
         context.become(registering(context.watch(actor) +: actors))
-      case _: Terminated if actors.size == 1 =>
+      case _: Terminated if actors.lengthCompare(1) == 0 =>
         replyTo ! Done
       case Terminated(actor) =>
         context.become(registering(actors.filterNot(_ == actor)))
