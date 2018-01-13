@@ -11,6 +11,8 @@ import akka.util.ByteString
 import java.nio.file.{ Files, Path, Paths }
 import java.util.concurrent.atomic.AtomicInteger
 
+import akka.stream.alpakka.unixdomainsocket.scaladsl.UnixDomainSocket
+
 import scala.concurrent.Promise
 import scala.concurrent.duration._
 import scala.util.{ Failure, Success }

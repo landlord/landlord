@@ -10,9 +10,9 @@ lazy val daemon = project
     libraryDependencies ++= Seq(
       akkaStream,
       akkSlf4j,
+      alpakkaUnixDomainSocket,
       commonsCompress,
       logbackClassic,
-      jnrUnixSocket,
       scopt,
       akkaTestKit % Test,
       scalaTest % Test
