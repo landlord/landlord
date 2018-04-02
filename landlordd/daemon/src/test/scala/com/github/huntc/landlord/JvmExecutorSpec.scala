@@ -65,8 +65,8 @@ class JvmExecutorSpec extends TestKit(ActorSystem("JvmExecutorSpec"))
       Files.createFile(base.resolve("lib/a.class"))
       Files.createFile(base.resolve("lib/b.jar"))
       Files.createFile(base.resolve("lib/c.txt"))
-      val resolved = JvmExecutor.resolvePaths(base, Paths.get("lib/*")).toList
-      assert(resolved === List(base.resolve("lib/a.class"), base.resolve("lib/b.jar")))
+      val resolved = JvmExecutor.resolvePaths(base, Paths.get("lib/*")).toSet
+      assert(resolved === Set(base.resolve("lib/a.class"), base.resolve("lib/b.jar")))
     }
   }
 
