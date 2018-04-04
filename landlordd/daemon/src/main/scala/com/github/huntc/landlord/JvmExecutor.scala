@@ -196,7 +196,7 @@ class JvmExecutor(
   def starting(unstopped: Boolean): Receive = {
     case StartProcess(commandLine, stdinSource) if unstopped =>
       val errCapture = new BoundedByteArrayOutputStream
-      val commandLineArgs = commandLine.split(" ")
+      val commandLineArgs = commandLine.split("\u0000")
       Console.withErr(errCapture) {
         val (parseArgs, mainArgs) = splitMainArgs(commandLineArgs)
         parser.parse(parseArgs, JavaConfig(mainArgs = mainArgs))

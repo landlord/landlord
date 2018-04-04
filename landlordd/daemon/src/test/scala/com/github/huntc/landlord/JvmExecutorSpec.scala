@@ -87,7 +87,7 @@ class JvmExecutorSpec extends TestKit(ActorSystem("JvmExecutorSpec"))
 
       val processId = 123
 
-      val cl = "-cp classes example.Hello"
+      val cl = "-cp\u0000classes\u0000example.Hello\u0000Hello World #1\u0000Hi #2"
 
       val TarBlockSize = 10240
       val tar = {
@@ -176,7 +176,7 @@ class JvmExecutorSpec extends TestKit(ActorSystem("JvmExecutorSpec"))
                 val exitCodeBytes = byteStrings.last.result
                 assert(
                   processIdBytes.iterator.getInt(ByteOrder.BIG_ENDIAN) == processId &&
-                    outputBytes.utf8String == stdinStr &&
+                    outputBytes.utf8String == s"Hello World #1\nHi #2\n${stdinStr}" &&
                     exitCodeBytes.iterator.getInt(ByteOrder.BIG_ENDIAN) == 0)
               }
           }(ExecutionContext.Implicits.global) // We use this context to get us off the ScalaTest one (which would hang this)

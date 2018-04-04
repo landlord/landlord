@@ -32,12 +32,15 @@ object ProcessParameterParser {
  *
  * The stream is presented as follows:
  *
- * 1. The first line (up until a LF) are the command line args to pass to the `java` command.
- *    The arguments are decoded as UTF-8. Note that any non-JVM options that are to be passed to the
- *    program itself should follow a "--" option e.g.:
- *      -cp some.jar example.Hello -- -b http://127.0.0.1:8080/conn
+ * 1. The first line (up until a LF) are the command line args to pass to the `java` command. Arguments
+ *    are separated by a null byte, i.e. \u0000 in UTF-8. The arguments are decoded as UTF-8. Note
+ *    that any non-JVM options that are to be passed to the program itself should follow a "--" option.
+ *
+ *    Full example: -cp\u0000some.jar\u0000example.Hello\u0000--\u0000-b\u0000http://127.0.0.1:8080/conn
+ *
  * 2. The next line represents the binary tar file output of the file system that the `java`
  *    command and its host program will ultimately read from e.g. containing the class files.
+ *
  * 3. The stream then represents stdin until the stream is completed. The input is decoded as UTF-8.
  *
  */
