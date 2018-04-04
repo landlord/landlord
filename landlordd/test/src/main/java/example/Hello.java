@@ -12,6 +12,10 @@ public class Hello {
             // An exception will be thrown when running via landlord started with --prevent-shutdown-hooks
         }
 
+        for (String arg: args) {
+            System.out.println(arg);
+        }
+
         BufferedReader br = new BufferedReader(new InputStreamReader(System.in));
         String line = br.readLine();
         if (line != null) System.out.println(line);
