@@ -351,10 +351,14 @@ class JvmExecutor(
     case ExitEarly(exitStatus, errorMessage) =>
       out.success(
         Source
-          .single {
-            errorMessage.fold(processIdToBytes(processId))(e => StderrPrefix ++ ByteString(e)) ++
+          .single(
+            processIdToBytes(processId) ++
+              errorMessage.fold(ByteString.empty) { e =>
+                val errorBytes = ByteString(e)
+                StderrPrefix ++ sizeToBytes(errorBytes.length) ++ errorBytes
+              } ++
               exitStatusToBytes(exitStatus)
-          }
+          )
           .watchTermination()(stopSelfWhenDone)
       )
   }
