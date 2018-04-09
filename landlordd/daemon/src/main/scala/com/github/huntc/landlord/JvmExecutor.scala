@@ -43,6 +43,7 @@ object JvmExecutor {
 
   case class StartProcess(commandLine: String, stdin: Source[ByteString, AnyRef])
   case class SignalProcess(signal: Int)
+  case object SignalProcessEot
   private case object StopSignalCheck
 
   private[landlord] class BoundedByteArrayOutputStream extends ByteArrayOutputStream {
@@ -186,6 +187,9 @@ class JvmExecutor(
         log.error(e, "Error while processing stream")
         self ! ExitEarly(1, Some(e.getMessage))
         throw e
+    }
+    .andThen {
+      case _ => self ! SignalProcessEot
     }
 
   def receive: Receive =
@@ -414,6 +418,13 @@ class JvmExecutor(
         ).start()
         if (signal == SIGABRT || signal == SIGINT || signal == SIGTERM)
           timers.startSingleTimer("signalCheck", StopSignalCheck, exitTimeout)
+      }
+
+    case SignalProcessEot =>
+      if (!processThreadGroup.isDestroyed) {
+        new Thread(
+          processThreadGroup, { () => stdin.signalClose() }
+        ).start()
       }
 
     case StopSignalCheck =>
