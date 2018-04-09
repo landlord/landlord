@@ -196,7 +196,7 @@ pub fn app_cmdline(
         if args.is_empty() {
             format!("")
         } else {
-            format!("\u{0000}--\u{0000}{}", args.join("\u{0000}"))
+            format!("\u{0000}{}", args.join("\u{0000}"))
         }
     )
 }
@@ -260,7 +260,7 @@ fn test_app_cmdline_with_args() {
             &"com.example.HelloWorld2".to_string(),
             &vec!["argone".to_string(), "arg two".to_string()]
         ),
-        "l-cp\u{0000}0:1\u{0000}com.example.HelloWorld2\u{0000}--\u{0000}argone\u{0000}arg two\n"
+        "l-cp\u{0000}0:1\u{0000}com.example.HelloWorld2\u{0000}argone\u{0000}arg two\n"
             .to_string()
     )
 }
@@ -277,7 +277,7 @@ fn test_app_cmdline_with_args_props() {
             &"com.example.HelloWorld2".to_string(),
             &vec!["argone".to_string(), "arg two".to_string()]
         ),
-        "l-Done=#1!\u{0000}-Dtwo=#2!\u{0000}-cp\u{0000}0:1\u{0000}com.example.HelloWorld2\u{0000}--\u{0000}argone\u{0000}arg two\n"
+        "l-Done=#1!\u{0000}-Dtwo=#2!\u{0000}-cp\u{0000}0:1\u{0000}com.example.HelloWorld2\u{0000}argone\u{0000}arg two\n"
             .to_string()
     )
 }
