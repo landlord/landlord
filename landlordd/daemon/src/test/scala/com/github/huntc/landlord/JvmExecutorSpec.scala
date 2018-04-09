@@ -24,34 +24,6 @@ class JvmExecutorSpec extends TestKit(ActorSystem("JvmExecutorSpec"))
 
   implicit val ma: ActorMaterializer = ActorMaterializer()
 
-  "The Java config" should {
-    "Accept just two regular classpath arg and the main class" in {
-      val parsed = JvmExecutor.parser.parse(List("-cp", "somepath:someotherpath", "mainclass"), JvmExecutor.JavaConfig())
-      assert(parsed.contains(JvmExecutor.JavaConfig(List(Paths.get("somepath"), Paths.get("someotherpath")), "mainclass")))
-    }
-
-    "Accept just a glob classpath arg and the main class" in {
-      val parsed = JvmExecutor.parser.parse(List("-cp", "lib/*", "mainclass"), JvmExecutor.JavaConfig())
-      assert(parsed.contains(JvmExecutor.JavaConfig(List(Paths.get("lib/*")), "mainclass")))
-    }
-
-    "Return just the main class when no args" in {
-      val parsed = JvmExecutor.parser.parse(List("mainclass"), JvmExecutor.JavaConfig())
-      assert(parsed.contains(JvmExecutor.JavaConfig(List.empty, "mainclass")))
-    }
-
-    "Return the main class and args" in {
-      val parsed = JvmExecutor.parser.parse(List("mainclass", "mainarg0", "mainarg1"), JvmExecutor.JavaConfig())
-      assert(parsed.contains(JvmExecutor.JavaConfig(List.empty, "mainclass", List("mainarg0", "mainarg1"))))
-    }
-
-    "Return the main class, main options and args" in {
-      val (parseArgs, mainArgs) = JvmExecutor.splitMainArgs(Array("mainclass", "mainarg0", "--", "-o", "mainopt0"))
-      val parsed = JvmExecutor.parser.parse(parseArgs, JvmExecutor.JavaConfig(mainArgs = mainArgs))
-      assert(parsed.contains(JvmExecutor.JavaConfig(List.empty, "mainclass", List("-o", "mainopt0", "mainarg0"))))
-    }
-  }
-
   "The classpath resolver" should {
     "resolve a non-glob" in {
       val resolved = JvmExecutor.resolvePaths(Paths.get("/tmp"), Paths.get("a.class")).toList
@@ -87,7 +59,7 @@ class JvmExecutorSpec extends TestKit(ActorSystem("JvmExecutorSpec"))
 
       val processId = 123
 
-      val cl = "-cp\u0000classes\u0000example.Hello\u0000Hello World #1\u0000Hi #2"
+      val cl = "-Dgreeting=This is a test\u0000-cp\u0000classes\u0000example.Hello\u0000Hello World #1\u0000Hi #2"
 
       val TarBlockSize = 10240
       val tar = {
@@ -176,7 +148,7 @@ class JvmExecutorSpec extends TestKit(ActorSystem("JvmExecutorSpec"))
                 val exitCodeBytes = byteStrings.last.result
                 assert(
                   processIdBytes.iterator.getInt(ByteOrder.BIG_ENDIAN) == processId &&
-                    outputBytes.utf8String == s"Hello World #1\nHi #2\n${stdinStr}" &&
+                    outputBytes.utf8String == s"This is a test\nHello World #1\nHi #2\n${stdinStr}" &&
                     exitCodeBytes.iterator.getInt(ByteOrder.BIG_ENDIAN) == 0)
               }
           }(ExecutionContext.Implicits.global) // We use this context to get us off the ScalaTest one (which would hang this)

@@ -54,29 +54,6 @@ object JvmExecutor {
       if (count + (len - off) < MaxOutputSize) super.write(b, off, len)
   }
 
-  private[landlord] case class JavaConfig(
-      cp: Seq[Path] = List.empty,
-      mainClass: String = "",
-      mainArgs: Seq[String] = List.empty
-  )
-
-  private[landlord] val parser = new scopt.OptionParser[JavaConfig](Version.executableScriptName) {
-    opt[String]("classpath").abbr("cp").action { (x, c) =>
-      c.copy(cp = x.split(":").map(p => Paths.get(p)))
-    }
-
-    arg[String]("main class").action { (x, c) =>
-      c.copy(mainClass = x)
-    }
-
-    arg[String]("main args").optional().unbounded().action { (x, c) =>
-      c.copy(mainArgs = c.mainArgs :+ x)
-    }
-
-    override def terminate(exitState: Either[String, Unit]): Unit =
-      ()
-  }
-
   private[landlord] def splitMainArgs(commandLineArgs: Array[String]): (Array[String], Array[String]) = {
     val parseArgs = commandLineArgs.takeWhile(_ != "--")
     val mainArgs = commandLineArgs.diff(parseArgs).dropWhile(_ == "--")
@@ -195,13 +172,10 @@ class JvmExecutor(
 
   def starting(unstopped: Boolean): Receive = {
     case StartProcess(commandLine, stdinSource) if unstopped =>
-      val errCapture = new BoundedByteArrayOutputStream
-      val commandLineArgs = commandLine.split("\u0000")
-      Console.withErr(errCapture) {
-        val (parseArgs, mainArgs) = splitMainArgs(commandLineArgs)
-        parser.parse(parseArgs, JavaConfig(mainArgs = mainArgs))
-      } match {
-        case Some(javaConfig) =>
+      val commandLineArgs = commandLine.split("\u0000").toVector
+
+      JavaArgs.parse(commandLineArgs) match {
+        case Right(javaConfig) =>
           // Setup stdio streaming
           val stdinIs = stdinSource.runWith(StreamConverters.asInputStream(stdinTimeout))
 
@@ -218,11 +192,16 @@ class JvmExecutor(
           val exitStatusPromise = Promise[Int]()
 
           // Resolve our process classes
-          val classpath = javaConfig.cp.flatMap(cp => resolvePaths(processDirPath, cp).map(_.toUri.toURL))
+          val classpath = javaConfig.cp.flatMap(cp => resolvePaths(processDirPath, Paths.get(cp)).map(_.toUri.toURL))
           val classLoader = new URLClassLoader(classpath.toArray, null)
           val classLoaderWeakRef = new WeakReference(classLoader)
           try {
-            val cls = classLoader.loadClass(javaConfig.mainClass)
+            val (clsName, args) =
+              javaConfig.mode match {
+                case ClassExecutionMode(clsName, args) => clsName -> args
+              }
+
+            val cls = classLoader.loadClass(clsName)
             val meth = cls.getMethod("main", classOf[Array[String]])
 
             // Launch our "process"
@@ -287,6 +266,12 @@ class JvmExecutor(
                   stderr.init(stderrPos)
                   val props = new Properties(properties.fallback)
                   props.setProperty("user.dir", processDirPath.toAbsolutePath.toString)
+
+                  javaConfig.props.foreach {
+                    case (name, value) =>
+                      props.setProperty(name, value)
+                  }
+
                   properties.init(props)
                   securityManager.init(new SecurityManager() {
                     override def checkExit(status: Int): Unit =
@@ -307,7 +292,7 @@ class JvmExecutor(
                     override def checkPermission(perm: Permission, context: Object): Unit =
                       if (useDefaultSecurityManager) super.checkPermission(perm, context)
                   })
-                  meth.invoke(null, javaConfig.mainArgs.toArray.asInstanceOf[Object])
+                  meth.invoke(null, args.toArray.asInstanceOf[Object])
                 }: Runnable,
                 "main-process-" + processId
               )
@@ -338,8 +323,8 @@ class JvmExecutor(
               classLoader.close()
               self ! ExitEarly(1, Some(if (e.getCause != null) e.getCause.toString else e.toString))
           }
-        case None =>
-          self ! ExitEarly(1, Some(errCapture.toString))
+        case Left(errors) =>
+          self ! ExitEarly(1, Some(errors.mkString(",")))
       }
 
     case _: StartProcess =>
