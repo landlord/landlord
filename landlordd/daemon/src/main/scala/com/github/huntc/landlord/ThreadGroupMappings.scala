@@ -1,9 +1,10 @@
 package com.github.huntc.landlord
 
-import java.io.{ FileDescriptor, InputStream, PrintStream }
+import java.io.{ FileDescriptor, IOException, InputStream, PrintStream }
 import java.net.InetAddress
 import java.security.Permission
 import java.util.Properties
+
 import scala.collection.immutable.HashMap
 
 /**
@@ -39,7 +40,13 @@ class ThreadGroupInputStream(in: InputStream)
   extends InputStream
   with ThreadGroupMapping[InputStream] {
 
+  @volatile protected var closed = false
+
   protected val _fallback: InputStream = in
+
+  def signalClose(): Unit = {
+    closed = true
+  }
 
   override def available(): Int =
     get.available()
@@ -54,19 +61,27 @@ class ThreadGroupInputStream(in: InputStream)
     get.markSupported()
 
   override def read(): Int =
-    get.read()
+    catchIfClosed(get.read())
 
   override def read(b: Array[Byte]): Int =
-    get.read(b)
+    catchIfClosed(get.read(b))
 
   override def read(b: Array[Byte], off: Int, len: Int): Int =
-    get.read(b, off, len)
+    catchIfClosed(get.read(b, off, len))
 
   override def reset(): Unit =
     get.reset()
 
   override def skip(n: Long): Long =
     get.skip(n)
+
+  protected def catchIfClosed(f: => Int): Int = {
+    try {
+      f
+    } catch {
+      case _: IOException if closed => -1
+    }
+  }
 }
 
 /**

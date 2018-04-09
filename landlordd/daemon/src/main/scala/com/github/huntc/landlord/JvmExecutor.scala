@@ -13,6 +13,7 @@ import java.nio.ByteOrder
 import java.nio.file.{ Files, Path, Paths }
 import java.security.Permission
 import java.util.Properties
+import java.util.concurrent.atomic.AtomicBoolean
 
 import scala.collection.JavaConverters._
 import scala.concurrent.{ Future, Promise }
@@ -42,6 +43,7 @@ object JvmExecutor {
 
   case class StartProcess(commandLine: String, stdin: Source[ByteString, AnyRef])
   case class SignalProcess(signal: Int)
+  case object SignalProcessEot
   private case object StopSignalCheck
 
   private[landlord] class BoundedByteArrayOutputStream extends ByteArrayOutputStream {
@@ -164,7 +166,7 @@ class JvmExecutor(
         throw e
     }
     .andThen {
-      case _ => self ! SignalProcess(SIGINT)
+      case _ => self ! SignalProcessEot
     }
 
   def receive: Receive =
@@ -195,6 +197,7 @@ class JvmExecutor(
           val classpath = javaConfig.cp.flatMap(cp => resolvePaths(processDirPath, Paths.get(cp)).map(_.toUri.toURL))
           val classLoader = new URLClassLoader(classpath.toArray, null)
           val classLoaderWeakRef = new WeakReference(classLoader)
+
           try {
             val (clsName, args) =
               javaConfig.mode match {
@@ -205,7 +208,7 @@ class JvmExecutor(
             val meth = cls.getMethod("main", classOf[Array[String]])
 
             // Launch our "process"
-            @volatile var stopped = false
+            val stopThreadLaunched = new AtomicBoolean(false)
             val processThreadGroup =
               new ThreadGroup("process-group-" + processId) {
                 override def uncaughtException(t: Thread, e: Throwable): Unit = {
@@ -213,7 +216,7 @@ class JvmExecutor(
                     val result = e match {
                       case ite: InvocationTargetException =>
                         ite.getCause match {
-                          case ExitException(s) if !stopped =>
+                          case ExitException(s) =>
                             Some(s) // It is normal for this exception to occur given that we want the process to explicitly exit
                           case null =>
                             stderr.fallback.println(s"An unexpected exception with a null cause has occurred within landlord given process $processId. Stacktrace follows.")
@@ -228,7 +231,7 @@ class JvmExecutor(
                             otherCause.printStackTrace()
                             None
                         }
-                      case ExitException(s) if !stopped =>
+                      case ExitException(s) =>
                         Some(s) // It is normal for this exception to occur given that we want the process to explicitly exit
                       case otherException =>
                         stderr.fallback.println(s"An internal error has occurred within landlord given process $processId. Stacktrace follows.")
@@ -236,16 +239,52 @@ class JvmExecutor(
                         stderr.println("Something went wrong - see Landlord's log")
                         Some(70) // EXIT_SOFTWARE, Internal Software Error as defined in BSD sysexits.h
                     }
-                    if (result.isDefined) stopped = true
                     result
                   }
                   check match {
                     case Some(status) =>
-                      stdin.destroy()
-                      stdout.destroy()
-                      stderr.destroy()
-                      properties.destroy()
-                      securityManager.destroy()
+                      val group = t.getThreadGroup
+
+                      if (stopThreadLaunched.compareAndSet(false, true)) {
+                        new Thread(group, { () =>
+                          log.debug("Launched cleanup thread for group {}", group.getName)
+
+                          val currentThread = Thread.currentThread
+
+                          def activeThreads(): Seq[Thread] = {
+                            val threadsInGroup = new Array[Thread](group.activeCount())
+
+                            group.enumerate(threadsInGroup)
+
+                            threadsInGroup.filterNot(_ == currentThread)
+                          }
+
+                          @annotation.tailrec
+                          def waitForTermination(): Unit =
+                            activeThreads() match {
+                              case h +: _ =>
+                                try {
+                                  h.join()
+                                } catch {
+                                  case _: InterruptedException =>
+                                }
+
+                                waitForTermination()
+                              case _ =>
+                            }
+
+                          waitForTermination()
+
+                          log.debug("All threads in group {} have terminated, cleaning up", group.getName)
+
+                          stdin.destroy()
+                          stdout.destroy()
+                          stderr.destroy()
+                          properties.destroy()
+                          securityManager.destroy()
+                        }).start()
+                      }
+
                       Thread.sleep(outputDrainTimeAtExit.toMillis)
                       stdoutPos.close()
                       stderrPos.close()
@@ -257,6 +296,7 @@ class JvmExecutor(
                 }
               }
             processThreadGroup.setDaemon(true)
+
             val processThread =
               new Thread(
                 processThreadGroup,
@@ -363,6 +403,13 @@ class JvmExecutor(
         ).start()
         if (signal == SIGABRT || signal == SIGINT || signal == SIGTERM)
           timers.startSingleTimer("signalCheck", StopSignalCheck, exitTimeout)
+      }
+
+    case SignalProcessEot =>
+      if (!processThreadGroup.isDestroyed) {
+        new Thread(
+          processThreadGroup, { () => stdin.signalClose() }
+        ).start()
       }
 
     case StopSignalCheck =>
