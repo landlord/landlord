@@ -34,9 +34,10 @@ object ProcessParameterParser {
  *
  * 1. The first line (up until a LF) are the command line args to pass to the `java` command. Arguments
  *    are separated by a null byte, i.e. \u0000 in UTF-8. The arguments are decoded as UTF-8. Note
- *    that any non-JVM options that are to be passed to the program itself should follow a "--" option.
+ *    that any non-JVM options that are to be passed to the program itself should follow a class name
+ *    argument (which doesn't begin with a dash), per the `java` command's format.
  *
- *    Full example: -cp\u0000some.jar\u0000example.Hello\u0000--\u0000-b\u0000http://127.0.0.1:8080/conn
+ *    Full example: -cp\u0000some.jar\u0000example.Hello\u0000-b\u0000http://127.0.0.1:8080/conn
  *
  * 2. The next line represents the binary tar file output of the file system that the `java`
  *    command and its host program will ultimately read from e.g. containing the class files.

@@ -12,6 +12,8 @@ public class Hello {
             // An exception will be thrown when running via landlord started with --prevent-shutdown-hooks
         }
 
+        System.out.println(System.getProperty("greeting", "No greeting was specified"));
+
         for (String arg: args) {
             System.out.println(arg);
         }
