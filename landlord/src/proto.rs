@@ -59,20 +59,6 @@ where
                 if let Err(e) = writer(vec![]) {
                     return Err(e);
                 }
-                /*
-                let result = encode_i32(pid)
-                    .and_then(|ref mut pid_bytes| {
-                        let mut data = vec![];
-
-                        data.push(b't');
-                        data.append(pid_bytes);
-
-                        single_session_writer(data)
-                    });
-
-                if let Err(e) = result {
-                    return Err(e);
-                }*/
             }
 
             Ok(Input::Signal(s)) => {

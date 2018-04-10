@@ -252,10 +252,11 @@ pub fn install_fs_and_start(
     })
 }
 
-/// Tracks num bytes written to the provided `stream` and ensures
-/// that zero-padded blocks are written. Implemented because
-/// landlordd requires block size of 20, but the tar lib
-/// doesn't support that
+/// BlockSizeWritter ensures that data written to a provided `stream`
+/// is done in zero-padded blocks of the provided size. landlordd
+/// expects GNU-standard blocking factor of 20, so when writing tar
+/// data to it, `landlord` uses this wrapper with a `block_size` of
+/// 10240
 struct BlockSizeWriter<W: Write> {
     stream: Option<W>,
     written: usize,
