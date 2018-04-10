@@ -208,7 +208,7 @@ class JvmExecutor(
             val meth = cls.getMethod("main", classOf[Array[String]])
 
             // Launch our "process"
-            val stopThreadLaunched = new AtomicBoolean(false)
+            val stopInProgress = new AtomicBoolean(false)
             val processThreadGroup =
               new ThreadGroup("process-group-" + processId) {
                 override def uncaughtException(t: Thread, e: Throwable): Unit = {
@@ -245,9 +245,11 @@ class JvmExecutor(
                     case Some(status) =>
                       val group = t.getThreadGroup
 
-                      if (stopThreadLaunched.compareAndSet(false, true)) {
+                      if (stopInProgress.compareAndSet(false, true)) {
                         new Thread(group, { () =>
                           log.debug("Launched cleanup thread for group {}", group.getName)
+
+                          stdin.signalClose()
 
                           val currentThread = Thread.currentThread
 
@@ -283,13 +285,13 @@ class JvmExecutor(
                           properties.destroy()
                           securityManager.destroy()
                         }).start()
-                      }
 
-                      Thread.sleep(outputDrainTimeAtExit.toMillis)
-                      stdoutPos.close()
-                      stderrPos.close()
-                      classLoaderWeakRef.get.foreach(_.close())
-                      exitStatusPromise.success(status)
+                        Thread.sleep(outputDrainTimeAtExit.toMillis)
+                        stdoutPos.close()
+                        stderrPos.close()
+                        classLoaderWeakRef.get.foreach(_.close())
+                        exitStatusPromise.success(status)
+                      }
                     case None =>
                       self ! SignalProcess(SIGABRT)
                   }
