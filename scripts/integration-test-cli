@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-set -e
+set -ex
 
 # Builds the CLI and daemon and runs a small integration test
 
@@ -21,8 +21,8 @@ ROOT_DIR="$(cd "$(dirname "$SCRIPT_NAME")" && cd .. && pwd)"
 cd "$ROOT_DIR"
 
 # Build projects
-(cd landlord && cargo build --release)
-(cd landlordd && sbt daemon/stage)
+#(cd landlord && cargo build --release)
+#(cd landlordd && sbt daemon/stage)
 
 # TODO remove the line below once alpakka #882, landlord #27, landlord #28 merged
 exit 0
@@ -30,7 +30,10 @@ exit 0
 # Start landlordd
 rm -rf "$DIR"
 mkdir -p "$DIR"
-landlordd/daemon/target/universal/stage/bin/landlordd --bind-dir-path "$DIR" --prevent-shutdown-hooks &
+landlordd/daemon/target/universal/stage/bin/landlordd \
+    --bind-dir-path "$DIR" \
+    --prevent-shutdown-hooks \
+    --class-profiles one=landlordd/test-deps/one/target/scala-2.12/classes,two=landlordd/test-deps/two/target/scala-2.12/classes &
 LANDLORDD_PID="$!"
 
 while ! [ -e "$DIR/landlordd.sock" ]; do
@@ -41,10 +44,19 @@ done
 OUTPUT=$(echo Testing | ./landlord/target/release/landlord -Dgreeting='hello world' -socket "$DIR/landlordd.sock" -cp landlordd/test/target/scala-2.12/classes example.Hello)
 EXPECTED='hello world
 Testing'
+[ "$OUTPUT" = "$EXPECTED" ]
+
+# Run a program that tests profile #1
+OUTPUT=$(./landlord/target/release/landlord -Dlandlord.class-profile=one -socket "$DIR/landlordd.sock" -cp landlordd/test/target/scala-2.12/classes example.Profile)
+EXPECTED='one'
+[ "$OUTPUT" = "$EXPECTED" ]
+
+# Run a program that tests profile #1
+OUTPUT=$(./landlord/target/release/landlord -Dlandlord.class-profile=two -socket "$DIR/landlordd.sock" -cp landlordd/test/target/scala-2.12/classes example.Profile)
+EXPECTED='two'
+[ "$OUTPUT" = "$EXPECTED" ]
 
 # Shutdown landlordd
 kill "$LANDLORDD_PID"
 wait
 
-# Test that we got what we expected
-[ "$OUTPUT" = "$EXPECTED" ]

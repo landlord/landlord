@@ -29,7 +29,7 @@ object JavaArgs {
           step(
             if (as.tail.isEmpty) Seq.empty else as.tail.tail,
             as.tail.headOption.fold(accum.copy(errors = accum.errors :+ s"$flag requires class path specification")) { cp =>
-              accum.copy(cp = cp.split(":").toVector)
+              accum.copy(cp = classPathStrings(cp))
             }
           )
 
