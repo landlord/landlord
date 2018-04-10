@@ -1,6 +1,40 @@
-language: scala
+matrix:
+  include:
+    # landlordd (daemon)
+    - language: scala
+      cache:
+        directories:
+          - $HOME/.ivy2/cache
+          - $HOME/.sbt/launchers
+      before_cache:
+        # Ensure changes to the cache aren't persisted
+        - rm -rf $HOME/.ivy2/cache/com/github/huntc/landlord
+        # Delete all ivydata files since ivy touches them on each build
+        - find $HOME/.ivy2/cache -name "ivydata-*.properties" | xargs rm
+      before_script:
+        - cd landlordd
+        - unset _JAVA_OPTIONS
 
-before_script: 
-  - cd landlordd
-  - unset _JAVA_OPTIONS
+    # landlord (CLI)
+    - language: rust
+      before_script:
+        - cd landlord
 
+    # integration test (landlordd <--> landlord)
+    - language: scala
+      cache:
+        directories:
+          - $HOME/.ivy2/cache
+          - $HOME/.sbt/launchers
+      before_cache:
+        # Ensure changes to the cache aren't persisted
+        - rm -rf $HOME/.ivy2/cache/com/github/huntc/landlord
+        # Delete all ivydata files since ivy touches them on each build
+        - find $HOME/.ivy2/cache -name "ivydata-*.properties" | xargs rm
+      install:
+        - curl https://sh.rustup.rs/ | sh -s -- -y
+      before_script:
+        - unset _JAVA_OPTIONS
+        - export PATH="$HOME/.cargo/bin:$PATH"
+      script:
+        - scripts/integration-test-cli

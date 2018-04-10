@@ -4,19 +4,21 @@ import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.io.IOException;
 
+/**
+ * A simple example showing the usage of arguments, properties, and stdin.
+ * When run with `landlordd` and `landlord`, it should behave as a drop-in
+ * replacement to the `java` command.
+ */
 public class Hello {
     public static void main(String[] args) throws IOException {
-        try {
-            Runtime.getRuntime().addShutdownHook(new Thread(() -> System.out.println("Shutdown trapped")));
-        } catch (SecurityException ignored) {
-            // An exception will be thrown when running via landlord started with --prevent-shutdown-hooks
-        }
-
-        System.out.println(System.getProperty("greeting", "No greeting was specified"));
+        int i = 0;
 
         for (String arg: args) {
-            System.out.println(arg);
+            i++;
+            System.out.println(String.format("Argument #%s: %s", i, arg));
         }
+
+        System.out.println(System.getProperty("greeting", "Welcome. Please type a message."));
 
         BufferedReader br = new BufferedReader(new InputStreamReader(System.in));
         String line = br.readLine();
