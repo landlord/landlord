@@ -24,12 +24,90 @@ Discounting the regular JVM overhead of runnning the first service, Running Land
 ## What
 Landlord has a daemon service named `landlordd`. `landlordd` launches the JVM and runs some code that provides a secure Unix socket domain service where you can submit your JVM program to run. You may also send various [POSIX signals](https://en.wikipedia.org/wiki/Signal_(IPC)) that are trapped by your program in the conventional way for the JVM. You manage the daemon's lifecycle as per other services on your machines e.g. via initd.
 
-A client is also provided and named `landlord`. This client interfaces with `landlordd` and accepts a filesystem via stdin. The client provides the illusion that your program is running within it, in the same way that Docker clients do when they run containers via the Docker daemon. Landlord's architecture is very similar to Docker in this way i.e. there are clients and there is a daemon. One important difference though is that when your client terminates, so does its "process" as managed by its daemon i.e. there is deliberately no "detach" mode in order to reduce the potential for orphaned processes. Landlord clients themselves can be detached though. The goal is for the Landlord client to behave as your process would without Landlord, relaying signals etc.
+A client is also provided and named `landlord`. This client interfaces with `landlordd` to run your program, and provides an interface that is a drop-in replacement for the `java` command. The client provides the illusion that your program is running within it, in the same way that Docker clients do when they run containers via the Docker daemon. Landlord's architecture is very similar to Docker in this way i.e. there are clients and there is a daemon. One important difference though is that when your client terminates, so does its "process" as managed by its daemon i.e. there is deliberately no "detach" mode in order to reduce the potential for orphaned processes. Landlord clients themselves can be detached though. The goal is for the Landlord client to behave as your process would without Landlord, relaying signals etc.
+
+## Quick Start
+
+To get started with Landlord, you'll need [sbt](https://www.scala-sbt.org/) and [cargo](https://doc.rust-lang.org/cargo/). Once installed, the following will walk you through launching `landlordd` and running Java programs in it using the `landlord` client.
+
+1) Build `landlordd` and `landlord`
+
+```bash
+(cd landlordd && sbt daemon/stage) && (cd landlord && cargo build --release)
+```
+
+2) Start `landlordd`
+
+Next, start the `landlordd` daemon process.
+
+```bash
+landlordd/daemon/target/universal/stage/bin/landlordd
+```
+
+3) Run `Hello.java`
+
+In another terminal, let's try the first example program, `Hello.java`. This program prints a greeting to the screen and then forwards `stdin` to `stdout`.
+
+First, with the `java` command, i.e. not using Landlord.
+
+```bash
+echo Testing... | java -cp landlordd/test/target/scala-2.12/classes "-Dgreeting=Welcome!" example.Hello ArgOne ArgTwo
+```
+
+```
+Argument #1: ArgOne
+Argument #2: ArgTwo
+Welcome!
+Testing...
+```
+
+Next, with the `landlord` command. This will submit the program to `landlordd` for execution.
+
+```bash
+echo Testing... | landlord/target/release/landlord -cp landlordd/test/target/scala-2.12/classes "-Dgreeting=Welcome!" example.Hello ArgOne ArgTwo
+```
+
+```
+Argument #1: ArgOne
+Argument #2: ArgTwo
+Welcome!
+Testing...
+```
+
+4) Run `Count.java`
+
+`Count.java` is another example provided. It prints a message to the screen once every second until it it sent a signal, at which point it exits with the value of that signal.
+
+First, with the `java` command, i.e. not using Landlord. We'll start the program, wait a few seconds, and press `CTRL-C`.
+
+```bash
+java -cp landlordd/test/target/scala-2.12/classes example.Count || echo "Exited with $?"
+```
+
+```
+Iteration #0
+Iteration #1
+Iteration #2
+^CExited with 128
+```
+
+Next, let's try with the `landlord` command. Again, press `CTRL-C` after a few seconds.
+
+```bash
+landlord/target/release/landlord -cp landlordd/test/target/scala-2.12/classes example.Count || echo "Exited with $?"
+```
+
+```
+Iteration #0
+Iteration #1
+Iteration #2
+^CExited with 128
+```
 
 ## How
-From the command line, simply use the `landlord` command instead of the `java` tool and pass its filesystem via tar on `stdin` and you're good to go.
+From the command line, simply use the `landlord` command instead of the `java` tool and you're good to go.
 
-Under the hood, `landlord` will use a usergroup-secured Unix domain socket to send its arguments, including the streaming of the `tar` based file system from `stdin`. `landlordd` will consume the stream and create a new internal process invoked with a similar `java` command to the one it was invoked with.
+Under the hood, `landlord` will use a usergroup-secured Unix domain socket to send its arguments, including the streaming of the `tar` based file system specified by `-cp` or `-jar` arguments. `landlordd` will consume the stream and create a new internal process invoked with a similar `java` command to the one it was invoked with.
 
 landlordd emulates the forking of a process within the same JVM by providing:
 * a new classloader for each process that prohibits looking up landlord's and other process classes
@@ -78,10 +156,8 @@ public class Hello {
 
 Upon compiling and supposing a folder containing our "hello world" class at `./hello-world/out/production/hello-world`:
 
-> Note that the `landlord` client is not yet written. In order to launch landlordd, seeing [the section on building below](#Building)
-
 ```bash
-tar -c . | landlord -cp ./hello-world/out/production/hello-world Main
+landlord -cp ./hello-world/out/production/hello-world Main
 ```
 
 ## Considerations/trade-offs
@@ -102,7 +178,7 @@ Some tradeoffs that have been identified:
 Thanks to @retronym, @dragos and @dotta for their contributions to the above.
 
 ## landlord
-`landlord` (the client) streams stdin to `landlordd` until it receives a response. The response yields the exit code from your program which will then cause `landlord` exit with the same response code.
+`landlord` (the client) streams stdin to `landlordd` until it receives a response. The response yields the exit code from your program which will then cause `landlord` to exit with the same response code.
 
 Any POSIX signals sent to `landlord` while it is waiting for a reply will be forwarded onto `landlordd` and are then received by your program.
 

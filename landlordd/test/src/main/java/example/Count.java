@@ -2,6 +2,12 @@ package example;
 
 import java.io.IOException;
 
+/**
+ * A test program that counts until it receives a signal, and
+ * then exits with the value of the signal it received (plus 128).
+ * Used to test that signals are being handled correctly when
+ * using `landlordd` and `landlord`.
+ */
 public class Count {
     private static volatile int exitCode = -1;
 
@@ -24,8 +30,6 @@ public class Count {
 
     @SuppressWarnings("unused")
     public static void trap(int signal) {
-        System.out.println("Trapped: " + signal);
-        if ((signal & 0xf) > 0)             // Terminate
-            exitCode = 128 + signal; // As per the convention of exit codes
+        exitCode = 128 + signal;
     }
 }
