@@ -279,18 +279,18 @@ class JvmExecutor(
 
                           log.debug("All threads in group {} have terminated, cleaning up", group.getName)
 
+                          Thread.sleep(outputDrainTimeAtExit.toMillis)
+                          stdoutPos.close()
+                          stderrPos.close()
+                          classLoaderWeakRef.get.foreach(_.close())
+                          exitStatusPromise.success(status)
+
                           stdin.destroy()
                           stdout.destroy()
                           stderr.destroy()
                           properties.destroy()
                           securityManager.destroy()
                         }).start()
-
-                        Thread.sleep(outputDrainTimeAtExit.toMillis)
-                        stdoutPos.close()
-                        stderrPos.close()
-                        classLoaderWeakRef.get.foreach(_.close())
-                        exitStatusPromise.success(status)
                       }
                     case None =>
                       self ! SignalProcess(SIGABRT)
