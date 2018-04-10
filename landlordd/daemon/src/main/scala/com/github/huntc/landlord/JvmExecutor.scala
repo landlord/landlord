@@ -359,6 +359,9 @@ class JvmExecutor(
 
             context.become(started(cls, processThreadGroup, exitStatusPromise))
           } catch {
+            case e: UnsupportedClassVersionError =>
+              classLoader.close()
+              self ! ExitEarly(1, Some(if (e.getCause != null) e.getCause.toString else e.toString))
             case NonFatal(e) =>
               classLoader.close()
               self ! ExitEarly(1, Some(if (e.getCause != null) e.getCause.toString else e.toString))
