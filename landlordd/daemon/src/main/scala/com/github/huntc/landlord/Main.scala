@@ -1,5 +1,6 @@
 package com.github.huntc.landlord
 
+import java.net.URLClassLoader
 import java.nio.ByteOrder
 
 import akka.{ Done, NotUsed }
@@ -24,6 +25,7 @@ object Main extends App {
       preventShutdownHooks: Boolean = false,
       outputDrainTimeAtExit: FiniteDuration = 100.milliseconds,
       processDirPath: Path = Files.createTempDirectory("jvm-executor"),
+      profiles: Map[String, String] = Map.empty,
       stdinTimeout: FiniteDuration = 1.hour,
       useDefaultSecurityManager: Boolean = false
   )
@@ -74,6 +76,10 @@ object Main extends App {
     opt[Boolean]("use-default-security-manager").action { (x, c) =>
       c.copy(useDefaultSecurityManager = x)
     }.text("When true, the JVM's default security manager will be used for processes. The option defaults to false.")
+
+    opt[Map[String, String]]("class-profiles").valueName("<name>=<class-path>[,...]").action { (x, c) =>
+      c.copy(profiles = x)
+    }.text("Specify class profiles that an application can select (by specifying `landlord.class-profile` property) to inherit its classes.")
 
     checkConfig { c =>
       val bindDirFile = c.bindDirPath.toFile
@@ -204,6 +210,14 @@ object Main extends App {
 
       val reaper = system.actorOf(JvmExecutorReaper.props, "reaper")
 
+      val classProfiles = config
+        .profiles
+        .mapValues(profilePath =>
+          new URLClassLoader(
+            classPathUrls(
+              Paths.get("").toAbsolutePath,
+              classPathStrings(profilePath)).toArray))
+
       val binding =
         UnixDomainSocket()
           .bind(config.bindDirPath.resolve("landlordd.sock").toFile)
@@ -218,7 +232,8 @@ object Main extends App {
                 stdin, config.stdinTimeout, stdout, stderr,
                 in, out,
                 config.exitTimeout, config.outputDrainTimeAtExit,
-                config.processDirPath.resolve(processId.toString)
+                config.processDirPath.resolve(processId.toString),
+                classProfiles
               )
             }
 

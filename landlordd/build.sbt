@@ -59,6 +59,18 @@ lazy val test = project
     name := "test"
   )
 
+lazy val testDepsOne = project
+  .in(file("test-deps") / "one")
+  .settings(
+    name := "test-deps-one"
+  )
+
+lazy val testDepsTwo = project
+  .in(file("test-deps") / "two")
+  .settings(
+    name := "test-deps-two"
+  )
+
 lazy val root = project
   .in(file("."))
   .settings(
@@ -73,4 +85,4 @@ lazy val root = project
         .setPreference(DanglingCloseParenthesis, Preserve)
     ))
   )
- .aggregate(daemon, test)
+ .aggregate(daemon, test, testDepsOne, testDepsTwo)

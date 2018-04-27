@@ -6,6 +6,7 @@ import akka.stream.{ ActorMaterializer, ThrottleMode }
 import akka.stream.scaladsl.Source
 import akka.testkit._
 import java.io.ByteArrayOutputStream
+import java.net.URLClassLoader
 import java.nio.ByteOrder
 import java.nio.file.{ Files, Paths }
 
@@ -107,57 +108,183 @@ class JvmExecutorSpec extends TestKit(ActorSystem("JvmExecutorSpec"))
 
       val out = Promise[Source[ByteString, akka.NotUsed]]()
       val processDirPath = Files.createTempDirectory("jvm-executor-spec")
-      processDirPath.toFile.deleteOnExit()
 
-      val process =
-        system.actorOf(JvmExecutor.props(
-          123,
-          properties, securityManager, useDefaultSecurityManager = false, preventShutdownHooks = true,
-          stdin, 3.seconds.dilated, stdout, stderr,
-          in, out,
-          12.seconds.dilated, 100.milliseconds.dilated,
-          processDirPath
-        ))
+      try {
+        val process =
+          system.actorOf(JvmExecutor.props(
+            123,
+            properties, securityManager, useDefaultSecurityManager = false, preventShutdownHooks = true,
+            stdin, 3.seconds.dilated, stdout, stderr,
+            in, out,
+            12.seconds.dilated, 100.milliseconds.dilated,
+            processDirPath,
+            Map.empty
+          ))
 
-      val outputOk =
-        out.future
-          .flatMap { outSource =>
-            outSource
-              .runFold(ByteString.empty)(_ ++ _)
-              .map { bytes =>
-                val processIdBytes = bytes.take(4)
-                val (_, _, _, byteStrings) =
-                  bytes.drop(4).foldLeft((false, 0, 0, List.empty[ByteStringBuilder])) {
-                    case ((false, 0, 0, bs), b) if b == 'o'.toByte || b == 'e'.toByte =>
-                      (true, 0, 0, bs)
-                    case ((false, 0, 0, bs), b) if b == 'x'.toByte =>
-                      (false, 0, 4, bs :+ ByteString.newBuilder)
-                    case ((true, 0, 0, bs), b) =>
-                      (true, 1, (b & 0xff) << 24, bs)
-                    case ((true, 1, s, bs), b) =>
-                      (true, 2, s | ((b & 0xff) << 16), bs)
-                    case ((true, 2, s, bs), b) =>
-                      (true, 3, s | ((b & 0xff) << 8), bs)
-                    case ((true, 3, s, bs), b) =>
-                      (false, 0, s | (b & 0xff), bs :+ ByteString.newBuilder)
-                    case ((false, 0, s, bs), b) if s > 0 =>
-                      bs.last.putByte(b)
-                      (false, 0, s - 1, bs)
-                  }
-                val outputBytes = byteStrings.dropRight(1).foldLeft(ByteString.empty)(_ ++ _.result)
-                val exitCodeBytes = byteStrings.last.result
-                assert(
-                  processIdBytes.iterator.getInt(ByteOrder.BIG_ENDIAN) == processId &&
-                    outputBytes.utf8String == s"Argument #1: Hello World #1\nArgument #2: Hi #2\nThis is a test\n${stdinStr}" &&
-                    exitCodeBytes.iterator.getInt(ByteOrder.BIG_ENDIAN) == 0)
-              }
-          }(ExecutionContext.Implicits.global) // We use this context to get us off the ScalaTest one (which would hang this)
+        val outputOk =
+          out.future
+            .flatMap { outSource =>
+              outSource
+                .runFold(ByteString.empty)(_ ++ _)
+                .map { bytes =>
+                  val processIdBytes = bytes.take(4)
+                  val (_, _, _, byteStrings) =
+                    bytes.drop(4).foldLeft((false, 0, 0, List.empty[ByteStringBuilder])) {
+                      case ((false, 0, 0, bs), b) if b == 'o'.toByte || b == 'e'.toByte =>
+                        (true, 0, 0, bs)
+                      case ((false, 0, 0, bs), b) if b == 'x'.toByte =>
+                        (false, 0, 4, bs :+ ByteString.newBuilder)
+                      case ((true, 0, 0, bs), b) =>
+                        (true, 1, (b & 0xff) << 24, bs)
+                      case ((true, 1, s, bs), b) =>
+                        (true, 2, s | ((b & 0xff) << 16), bs)
+                      case ((true, 2, s, bs), b) =>
+                        (true, 3, s | ((b & 0xff) << 8), bs)
+                      case ((true, 3, s, bs), b) =>
+                        (false, 0, s | (b & 0xff), bs :+ ByteString.newBuilder)
+                      case ((false, 0, s, bs), b) if s > 0 =>
+                        bs.last.putByte(b)
+                        (false, 0, s - 1, bs)
+                    }
+                  val outputBytes = byteStrings.dropRight(1).foldLeft(ByteString.empty)(_ ++ _.result)
+                  val exitCodeBytes = byteStrings.last.result
+                  assert(
+                    processIdBytes.iterator.getInt(ByteOrder.BIG_ENDIAN) == processId &&
+                      outputBytes.utf8String == s"Argument #1: Hello World #1\nArgument #2: Hi #2\nThis is a test\n${stdinStr}" &&
+                      exitCodeBytes.iterator.getInt(ByteOrder.BIG_ENDIAN) == 0)
+                }
+            }(ExecutionContext.Implicits.global) // We use this context to get us off the ScalaTest one (which would hang this)
 
-      val watcher = TestProbe()
-      watcher.watch(process)
-      watcher.expectTerminated(process, max = 5.seconds.dilated)
+        val watcher = TestProbe()
+        watcher.watch(process)
+        watcher.expectTerminated(process, max = 5.seconds.dilated)
 
-      outputOk
+        outputOk
+      } finally {
+        deleteRecursively(processDirPath)
+      }
     }
+
+    "work with profiles" in {
+      // for this test, we're specifying an empty main classpath directory, and then selecting
+      // a profile that points at our actual classes
+
+      val stdin = new ThreadGroupInputStream(System.in)
+      val stdout = new ThreadGroupPrintStream(System.out)
+      val stderr = new ThreadGroupPrintStream(System.err)
+      System.setIn(stdin)
+      System.setOut(stdout)
+      System.setErr(stderr)
+
+      val properties = new ThreadGroupProperties(System.getProperties)
+      System.setProperties(properties)
+
+      val securityManager = new ThreadGroupSecurityManager(System.getSecurityManager)
+      System.setSecurityManager(securityManager)
+
+      val processDirPath = Files.createTempDirectory("jvm-executor-spec")
+
+      try {
+        Files.createDirectories(processDirPath.resolve("classes").resolve("dep"))
+        Files.createDirectories(processDirPath.resolve("classes").resolve("example"))
+
+        {
+          val classFile = Paths.get(getClass.getResource("/dep/Greeting.class").toURI)
+          val data = Files.readAllBytes(classFile)
+          Files.write(processDirPath.resolve("classes").resolve("dep").resolve("Greeting.class"), data)
+        }
+
+        {
+          val classFile = Paths.get(getClass.getResource("/example/Profile.class").toURI)
+          val data = Files.readAllBytes(classFile)
+          Files.write(processDirPath.resolve("classes").resolve("example").resolve("Profile.class"), data)
+        }
+
+        val processId = 124
+
+        val cl = "-Dlandlord.class-profile=myprofile\u0000-cp\u0000empty-dir\u0000example.Profile"
+
+        val TarBlockSize = 10240
+        val tar = {
+          val bos = new ByteArrayOutputStream()
+          val tos = new TarArchiveOutputStream(bos, TarBlockSize)
+          try {
+            {
+              val te = new TarArchiveEntry("empty-dir/")
+              tos.putArchiveEntry(te)
+              tos.closeArchiveEntry()
+            }
+            tos.flush()
+            tos.finish()
+          } finally {
+            tos.close()
+          }
+          bos.toByteArray
+        }
+
+        val in = Source(List(ByteString(cl + "\n") ++ ByteString(tar), ByteString.empty))
+        val out = Promise[Source[ByteString, akka.NotUsed]]()
+
+        val process =
+          system.actorOf(JvmExecutor.props(
+            124,
+            properties, securityManager, useDefaultSecurityManager = false, preventShutdownHooks = true,
+            stdin, 3.seconds.dilated, stdout, stderr,
+            in, out,
+            12.seconds.dilated, 100.milliseconds.dilated,
+            processDirPath,
+            Map("myprofile" -> new URLClassLoader(classPathUrls(processDirPath, classPathStrings("classes")).toArray))
+          ))
+
+        val outputOk =
+          out.future
+            .flatMap { outSource =>
+              outSource
+                .runFold(ByteString.empty)(_ ++ _)
+                .map { bytes =>
+                  val processIdBytes = bytes.take(4)
+                  val (_, _, _, byteStrings) =
+                    bytes.drop(4).foldLeft((false, 0, 0, List.empty[ByteStringBuilder])) {
+                      case ((false, 0, 0, bs), b) if b == 'o'.toByte || b == 'e'.toByte =>
+                        (true, 0, 0, bs)
+                      case ((false, 0, 0, bs), b) if b == 'x'.toByte =>
+                        (false, 0, 4, bs :+ ByteString.newBuilder)
+                      case ((true, 0, 0, bs), b) =>
+                        (true, 1, (b & 0xff) << 24, bs)
+                      case ((true, 1, s, bs), b) =>
+                        (true, 2, s | ((b & 0xff) << 16), bs)
+                      case ((true, 2, s, bs), b) =>
+                        (true, 3, s | ((b & 0xff) << 8), bs)
+                      case ((true, 3, s, bs), b) =>
+                        (false, 0, s | (b & 0xff), bs :+ ByteString.newBuilder)
+                      case ((false, 0, s, bs), b) if s > 0 =>
+                        bs.last.putByte(b)
+                        (false, 0, s - 1, bs)
+                    }
+                  val outputBytes = byteStrings.dropRight(1).foldLeft(ByteString.empty)(_ ++ _.result)
+                  val exitCodeBytes = byteStrings.last.result
+                  assert(
+                    processIdBytes.iterator.getInt(ByteOrder.BIG_ENDIAN) == processId &&
+                      outputBytes.utf8String == "built-in\n" &&
+                      exitCodeBytes.iterator.getInt(ByteOrder.BIG_ENDIAN) == 0)
+                }
+            }(ExecutionContext.Implicits.global) // We use this context to get us off the ScalaTest one (which would hang this)
+
+        val watcher = TestProbe()
+        watcher.watch(process)
+        watcher.expectTerminated(process, max = 5.seconds.dilated)
+
+        outputOk
+      } finally {
+        deleteRecursively(processDirPath)
+      }
+    }
+  }
+
+  private def deleteRecursively(path: java.nio.file.Path): Unit = {
+    Files
+      .walk(path, java.nio.file.FileVisitOption.FOLLOW_LINKS)
+      .sorted(java.util.Comparator.reverseOrder())
+      .forEach(f => assert(f.toFile.delete()))
   }
 }

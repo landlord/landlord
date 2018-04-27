@@ -28,7 +28,7 @@ object JvmExecutor {
     stdin: ThreadGroupInputStream, stdinTimeout: FiniteDuration, stdout: ThreadGroupPrintStream, stderr: ThreadGroupPrintStream,
     in: Source[ByteString, NotUsed], out: Promise[Source[ByteString, NotUsed]],
     exitTimeout: FiniteDuration, outputDrainTimeAtExit: FiniteDuration,
-    processDirPath: Path
+    processDirPath: Path, classProfiles: Map[String, ClassLoader]
   ): Props =
     Props(
       new JvmExecutor(
@@ -37,7 +37,8 @@ object JvmExecutor {
         stdin, stdinTimeout, stdout, stderr,
         in, out,
         exitTimeout, outputDrainTimeAtExit,
-        processDirPath
+        processDirPath,
+        classProfiles
       )
     )
 
@@ -124,7 +125,7 @@ class JvmExecutor(
     stdin: ThreadGroupInputStream, stdinTimeout: FiniteDuration, stdout: ThreadGroupPrintStream, stderr: ThreadGroupPrintStream,
     in: Source[ByteString, NotUsed], out: Promise[Source[ByteString, NotUsed]],
     exitTimeout: FiniteDuration, outputDrainTimeAtExit: FiniteDuration,
-    processDirPath: Path
+    processDirPath: Path, classProfiles: Map[String, ClassLoader]
 ) extends Actor with ActorLogging with Timers {
 
   import JvmExecutor._
@@ -176,8 +177,22 @@ class JvmExecutor(
     case StartProcess(commandLine, stdinSource) if unstopped =>
       val commandLineArgs = commandLine.split("\u0000").toVector
 
-      JavaArgs.parse(commandLineArgs) match {
-        case Right(javaConfig) =>
+      val validatedArgs =
+        for {
+          javaConfig <- JavaArgs.parse(commandLineArgs)
+          maybeProfile = javaConfig.props.find(_._1 == ClassProfilesProperty)
+          result <- maybeProfile match {
+            case None =>
+              Right(javaConfig -> None)
+            case Some((_, profileName)) if classProfiles.contains(profileName) =>
+              Right(javaConfig -> Some(classProfiles(profileName)))
+            case Some((_, profileName)) =>
+              Left(Vector(s"Class profile does not exist: $profileName"))
+          }
+        } yield result
+
+      validatedArgs match {
+        case Right((javaConfig, rootClassLoader)) =>
           // Setup stdio streaming
           val stdinIs = stdinSource.runWith(StreamConverters.asInputStream(stdinTimeout))
 
@@ -194,8 +209,8 @@ class JvmExecutor(
           val exitStatusPromise = Promise[Int]()
 
           // Resolve our process classes
-          val classpath = javaConfig.cp.flatMap(cp => resolvePaths(processDirPath, Paths.get(cp)).map(_.toUri.toURL))
-          val classLoader = new URLClassLoader(classpath.toArray, null)
+          val classPath = classPathUrls(processDirPath, javaConfig.cp)
+          val classLoader = new URLClassLoader(classPath.toArray, rootClassLoader.orNull)
           val classLoaderWeakRef = new WeakReference(classLoader)
 
           try {
