@@ -208,7 +208,7 @@ class JvmExecutor(
             val meth = cls.getMethod("main", classOf[Array[String]])
 
             // Launch our "process"
-            val stopThreadLaunched = new AtomicBoolean(false)
+            val stopInProgress = new AtomicBoolean(false)
             val processThreadGroup =
               new ThreadGroup("process-group-" + processId) {
                 override def uncaughtException(t: Thread, e: Throwable): Unit = {
@@ -245,9 +245,11 @@ class JvmExecutor(
                     case Some(status) =>
                       val group = t.getThreadGroup
 
-                      if (stopThreadLaunched.compareAndSet(false, true)) {
+                      if (stopInProgress.compareAndSet(false, true)) {
                         new Thread(group, { () =>
                           log.debug("Launched cleanup thread for group {}", group.getName)
+
+                          stdin.signalClose()
 
                           val currentThread = Thread.currentThread
 
@@ -277,6 +279,12 @@ class JvmExecutor(
 
                           log.debug("All threads in group {} have terminated, cleaning up", group.getName)
 
+                          Thread.sleep(outputDrainTimeAtExit.toMillis)
+                          stdoutPos.close()
+                          stderrPos.close()
+                          classLoaderWeakRef.get.foreach(_.close())
+                          exitStatusPromise.success(status)
+
                           stdin.destroy()
                           stdout.destroy()
                           stderr.destroy()
@@ -284,12 +292,6 @@ class JvmExecutor(
                           securityManager.destroy()
                         }).start()
                       }
-
-                      Thread.sleep(outputDrainTimeAtExit.toMillis)
-                      stdoutPos.close()
-                      stderrPos.close()
-                      classLoaderWeakRef.get.foreach(_.close())
-                      exitStatusPromise.success(status)
                     case None =>
                       self ! SignalProcess(SIGABRT)
                   }
@@ -359,6 +361,9 @@ class JvmExecutor(
 
             context.become(started(cls, processThreadGroup, exitStatusPromise))
           } catch {
+            case e: UnsupportedClassVersionError =>
+              classLoader.close()
+              self ! ExitEarly(1, Some(if (e.getCause != null) e.getCause.toString else e.toString))
             case NonFatal(e) =>
               classLoader.close()
               self ! ExitEarly(1, Some(if (e.getCause != null) e.getCause.toString else e.toString))
