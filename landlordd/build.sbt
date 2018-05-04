@@ -64,13 +64,14 @@ lazy val root = project
   .settings(
     inThisBuild(List(
       organization := "com.github.huntc",
-      scalaVersion := "2.12.4",
+      scalaVersion := "2.12.6",
       version      := "0.1.0-SNAPSHOT",
       scalacOptions ++= Seq("-unchecked", "-deprecation"),
       ScalariformKeys.preferences := ScalariformKeys.preferences.value
         .setPreference(AlignSingleLineCaseStatements, true)
         .setPreference(DoubleIndentConstructorArguments, true)
         .setPreference(DanglingCloseParenthesis, Preserve)
-    ))
+    )),
+    name := "landlordd"
   )
  .aggregate(daemon, test)
