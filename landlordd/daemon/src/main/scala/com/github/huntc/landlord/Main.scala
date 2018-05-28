@@ -31,6 +31,8 @@ object Main extends App {
   val parser = new scopt.OptionParser[Config](Version.executableScriptName) {
     head(Version.executableScriptName, Version.current)
     note("Daemon for sharing JVM memory between JVM processes - used with a client as a substitute for the `java` command")
+    help("help").text("prints this usage text")
+    version("version").text("prints version text")
 
     opt[String]("bind-dir-path").action { (x, c) =>
       c.copy(bindDirPath = Paths.get(x))
@@ -253,6 +255,7 @@ object Main extends App {
         }
 
     case None =>
-    // arguments are bad, error message will have been displayed
+      // arguments are bad, error message will have been displayed
+      sys.exit(1)
   }
 }
