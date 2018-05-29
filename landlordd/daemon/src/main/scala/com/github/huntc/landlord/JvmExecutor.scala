@@ -14,6 +14,7 @@ import java.nio.file.{ Files, Path, Paths }
 import java.security.Permission
 import java.util.Properties
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.logging.LogManager
 
 import scala.collection.JavaConverters._
 import scala.concurrent.{ Future, Promise }
@@ -126,6 +127,11 @@ class JvmExecutor(
     exitTimeout: FiniteDuration, outputDrainTimeAtExit: FiniteDuration,
     processDirPath: Path
 ) extends Actor with ActorLogging with Timers {
+
+  // java.util.logging.LogManager has a hard-coded addShutdownHook. By loading the
+  // class now we prevent any child processes from registering one themselves.
+
+  LogManager.getLogManager
 
   import JvmExecutor._
 
