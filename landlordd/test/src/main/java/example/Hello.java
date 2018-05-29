@@ -11,6 +11,20 @@ import java.io.IOException;
  */
 public class Hello {
     public static void main(String[] args) throws IOException {
+        // Landlord will call interrupt on the threads of programs it manages so
+        // that they can cooperatively terminate. We help test this by launching
+        // a thread that doesn't terminate until it has been interrupted.
+
+        new Thread(() -> {
+            while (!Thread.interrupted()) {
+                try {
+                    Thread.sleep(1000);
+                } catch (InterruptedException e) {
+                    break;
+                }
+            }
+        }).start();
+
         int i = 0;
 
         for (String arg: args) {

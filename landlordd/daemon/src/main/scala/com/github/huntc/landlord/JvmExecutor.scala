@@ -258,7 +258,11 @@ class JvmExecutor(
 
                             group.enumerate(threadsInGroup)
 
-                            threadsInGroup.filterNot(_ == currentThread)
+                            threadsInGroup.filterNot(t => t == null || t == currentThread)
+                          }
+
+                          activeThreads().foreach { thread =>
+                            thread.interrupt()
                           }
 
                           @annotation.tailrec
