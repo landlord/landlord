@@ -119,7 +119,7 @@ Given that we cannot reliably detect when a thread group's threads have all term
 
 > Detailed information: threads are quite often created with a default thread group in JVM programs e.g. when using `ThreadPoolExecutor`. Therefore, it is not possible to discern the "process threads" from the ones Landlord uses e.g. with stdin/out/err. The only reliable method of determining when a process is finished is when the developer says so i.e. `System.exit`.
 
-In addition, we warn about the adding of shutdown handlers given that they unavoidably apply to a process as a whole. Instead, a new `trap` function can be provided in place of shutdown handlers. Any signals passed to the process will be raised through this function. The `trap` function is declared as follows and must appear in the same class as the main function. Here is a full example in Java. The full example below permits both running within and outside of landlord:
+When an application is terminating (i.e. after the program has called `System.exit(status)`, its registered shutdown hooks (registered via `Runtime.getRuntime().addShutdownHook(..)`) will be called. Additionally, a new `trap` function can be used to capture signals at a more detailed level than the JVM provides. Any signals passed to the process (via the client) will be raised through this function. The `trap` function is declared as follows and must appear in the same class as the main function. Here is a full example in Java. The full example below permits both running within and outside of landlord:
 
 > Note that it is important to disable any existing shutdown handlers, or at least de-register them prior to calling `System.exit`. If you do not then your process's memory will never be freed as the JVM will retain a reference to its class loader.
 
@@ -132,11 +132,7 @@ import java.io.IOException;
 
 public class Hello {
     public static void main(String[] args) throws IOException {
-        try {
-            Runtime.getRuntime().addShutdownHook(new Thread(() -> System.out.println("Shutdown trapped")));
-        } catch (SecurityException ignored) {
-            // An exception will be thrown when running via landlord started with --prevent-shutdown-hooks
-        }
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> System.out.println("Shutdown trapped")));
 
         BufferedReader br = new BufferedReader(new InputStreamReader(System.in));
         String line = br.readLine();

@@ -24,7 +24,7 @@ import scala.util.control.NonFatal
 object JvmExecutor {
   def props(
     processId: Int,
-    properties: ThreadGroupProperties, securityManager: ThreadGroupSecurityManager, useDefaultSecurityManager: Boolean, preventShutdownHooks: Boolean,
+    properties: ThreadGroupProperties, securityManager: ThreadGroupSecurityManager, useDefaultSecurityManager: Boolean,
     stdin: ThreadGroupInputStream, stdinTimeout: FiniteDuration, stdout: ThreadGroupPrintStream, stderr: ThreadGroupPrintStream,
     in: Source[ByteString, NotUsed], out: Promise[Source[ByteString, NotUsed]],
     exitTimeout: FiniteDuration, outputDrainTimeAtExit: FiniteDuration,
@@ -33,7 +33,7 @@ object JvmExecutor {
     Props(
       new JvmExecutor(
         processId,
-        properties, securityManager, useDefaultSecurityManager, preventShutdownHooks,
+        properties, securityManager, useDefaultSecurityManager,
         stdin, stdinTimeout, stdout, stderr,
         in, out,
         exitTimeout, outputDrainTimeAtExit,
@@ -95,6 +95,73 @@ object JvmExecutor {
   private[landlord] val ShutdownHooksPerm = new RuntimePermission("shutdownHooks")
 
   private[landlord] case class ExitException(status: Int) extends SecurityException
+
+  /**
+   * Determines all of the active threads that are (recursively) a member of
+   * a thread group.
+   */
+  private[landlord] def activeThreads(group: ThreadGroup): Set[Thread] =
+    Thread
+      .getAllStackTraces
+      .keySet
+      .asScala
+      .filter(t => memberOfThreadGroup(t.getThreadGroup, group))
+      .toSet
+
+  /**
+   * Determines if `subject` is a member of `group`, recursively.
+   */
+  @annotation.tailrec
+  def memberOfThreadGroup(subject: ThreadGroup, group: ThreadGroup): Boolean =
+    if (subject == null || group == null)
+      false
+    else if (subject == group)
+      true
+    else
+      memberOfThreadGroup(subject.getParent, group)
+
+  /**
+   * Given a `ThreadGroup`, unregisters all shutdown hooks that
+   * 'belong' to that thread group and returns them.
+   *
+   * If there is a failure obtaining the shutdown hooks, an
+   * `IllegalStateException` is thrown.
+   */
+  private[landlord] def removeShutdownHooks(group: ThreadGroup): Set[Thread] = {
+    var hooks: Set[Thread] = null
+
+    try {
+      val hooksField = Class
+        .forName("java.lang.ApplicationShutdownHooks")
+        .getDeclaredField("hooks")
+
+      hooksField.setAccessible(true)
+
+      val allHooks = hooksField.get(null)
+
+      if (allHooks != null) {
+        hooks = allHooks
+          .asInstanceOf[java.util.IdentityHashMap[Thread, Thread]]
+          .keySet
+          .asScala
+          .filter(t => memberOfThreadGroup(t.getThreadGroup, group))
+          .toSet
+      }
+    } catch {
+      case _: NoSuchFieldException | _: ClassCastException | _: IllegalAccessException | _: IllegalArgumentException | _: ExceptionInInitializerError =>
+      // we ignore any expected reflection related exceptions as we'll throw our own IllegalStateException below
+      // other exception types are unexpected and thus will be thrown
+    }
+
+    if (hooks == null)
+      throw new IllegalStateException("Could not access java.lang.ApplicationShutdownHooks.fields")
+
+    hooks.foreach { hook =>
+      Runtime.getRuntime.removeShutdownHook(hook)
+    }
+
+    hooks
+  }
 }
 
 /**
@@ -120,7 +187,7 @@ object JvmExecutor {
  */
 class JvmExecutor(
     processId: Int,
-    properties: ThreadGroupProperties, securityManager: ThreadGroupSecurityManager, useDefaultSecurityManager: Boolean, preventShutdownHooks: Boolean,
+    properties: ThreadGroupProperties, securityManager: ThreadGroupSecurityManager, useDefaultSecurityManager: Boolean,
     stdin: ThreadGroupInputStream, stdinTimeout: FiniteDuration, stdout: ThreadGroupPrintStream, stderr: ThreadGroupPrintStream,
     in: Source[ByteString, NotUsed], out: Promise[Source[ByteString, NotUsed]],
     exitTimeout: FiniteDuration, outputDrainTimeAtExit: FiniteDuration,
@@ -253,47 +320,62 @@ class JvmExecutor(
 
                           val currentThread = Thread.currentThread
 
-                          def activeThreads(): Seq[Thread] = {
-                            val threadsInGroup = new Array[Thread](group.activeCount())
+                          activeThreads(group)
+                            .filter(_ != currentThread)
+                            .foreach { thread =>
+                              thread.interrupt()
+                            }
 
-                            group.enumerate(threadsInGroup)
+                          try {
+                            val shutdownHooks = removeShutdownHooks(group)
 
-                            threadsInGroup.filterNot(t => t == null || t == currentThread)
+                            log.debug("Running {} shutdown hooks", shutdownHooks.size)
+
+                            shutdownHooks.foreach { thread =>
+                              thread.start()
+                            }
+                          } catch {
+                            case _: IllegalStateException =>
+                              log.warning("Unable to access shutdown hooks; they will not be run until the JVM exits")
                           }
 
-                          activeThreads().foreach { thread =>
-                            thread.interrupt()
-                          }
+                          // A couple notes on shutdown hooks:
+                          // 1) We don't interrupt shutdown hook threads -- this behavior is
+                          // consistent with the JVM which doesn't interrupt them either.
+                          // 2) It's possible that a shutdown hook registered its own hook. In that
+                          // case, they will not be executed until landlordd itself is shutdown.
 
                           @annotation.tailrec
                           def waitForTermination(): Unit =
-                            activeThreads() match {
-                              case h +: _ =>
+                            activeThreads(group).find(_ != currentThread) match {
+                              case Some(h) =>
                                 try {
                                   h.join()
-                                } catch {
-                                  case _: InterruptedException =>
-                                }
+                                } catch { case _: InterruptedException => }
 
                                 waitForTermination()
                               case _ =>
                             }
 
-                          waitForTermination()
+                          try {
+                            Thread.sleep(outputDrainTimeAtExit.toMillis)
+                          } catch { case _: InterruptedException => }
 
-                          log.debug("All threads in group {} have terminated, cleaning up", group.getName)
-
-                          Thread.sleep(outputDrainTimeAtExit.toMillis)
+                          stdinIs.close()
                           stdoutPos.close()
                           stderrPos.close()
                           classLoaderWeakRef.get.foreach(_.close())
-                          exitStatusPromise.success(status)
-
                           stdin.destroy()
                           stdout.destroy()
                           stderr.destroy()
                           properties.destroy()
                           securityManager.destroy()
+
+                          waitForTermination()
+
+                          log.debug("All threads in group {} have terminated, cleaning up", group.getName)
+
+                          exitStatusPromise.success(status)
                         }).start()
                       }
                     case None =>
@@ -323,15 +405,7 @@ class JvmExecutor(
                     override def checkExit(status: Int): Unit =
                       throw ExitException(status) // This will be caught as an uncaught exception
                     override def checkPermission(perm: Permission): Unit = {
-                      if (perm == ShutdownHooksPerm) {
-                        val message = """|: Shutdown hooks are not applicable within landlord as many applications reside in the same JVM.
-                                         |Declare a `public static void trap(int signal)` for trapping signals and ultimately call
-                                         |System.exit to exit.""".stripMargin
-                        if (preventShutdownHooks)
-                          throw new SecurityException("Error" + message)
-                        else
-                          System.err.println("Warning" + message)
-                      } else if (useDefaultSecurityManager) {
+                      if (useDefaultSecurityManager) {
                         super.checkPermission(perm)
                       }
                     }

@@ -28,7 +28,7 @@ wait
 # Start landlordd
 rm -rf "$DIR"
 mkdir -p "$DIR"
-landlordd/daemon/target/universal/stage/bin/landlordd --bind-dir-path "$DIR" --prevent-shutdown-hooks &
+landlordd/daemon/target/universal/stage/bin/landlordd --bind-dir-path "$DIR" &
 LANDLORDD_PID="$!"
 
 while ! [ -e "$DIR/landlordd.sock" ]; do
@@ -38,7 +38,8 @@ done
 # Run a program that uses stdin and properties
 OUTPUT=$(echo Testing | ./landlord/target/release/landlord -Dgreeting='hello world' -socket "$DIR/landlordd.sock" -cp landlordd/test/target/scala-2.12/classes example.Hello)
 EXPECTED='hello world
-Testing'
+Testing
+Good Bye!'
 
 # Shutdown landlordd
 kill "$LANDLORDD_PID"

@@ -112,7 +112,7 @@ class JvmExecutorSpec extends TestKit(ActorSystem("JvmExecutorSpec"))
       val process =
         system.actorOf(JvmExecutor.props(
           123,
-          properties, securityManager, useDefaultSecurityManager = false, preventShutdownHooks = true,
+          properties, securityManager, useDefaultSecurityManager = false,
           stdin, 3.seconds.dilated, stdout, stderr,
           in, out,
           12.seconds.dilated, 100.milliseconds.dilated,
@@ -148,16 +148,165 @@ class JvmExecutorSpec extends TestKit(ActorSystem("JvmExecutorSpec"))
                 val exitCodeBytes = byteStrings.last.result
                 assert(
                   processIdBytes.iterator.getInt(ByteOrder.BIG_ENDIAN) == processId &&
-                    outputBytes.utf8String == s"Argument #1: Hello World #1\nArgument #2: Hi #2\nThis is a test\n${stdinStr}" &&
+                    outputBytes.utf8String == s"Argument #1: Hello World #1\nArgument #2: Hi #2\nThis is a test\n${stdinStr}Good Bye!\n" &&
                     exitCodeBytes.iterator.getInt(ByteOrder.BIG_ENDIAN) == 0)
               }
           }(ExecutionContext.Implicits.global) // We use this context to get us off the ScalaTest one (which would hang this)
 
       val watcher = TestProbe()
       watcher.watch(process)
-      watcher.expectTerminated(process, max = 5.seconds.dilated)
+      watcher.expectTerminated(process, max = 10.seconds.dilated)
 
       outputOk
+    }
+  }
+
+  "activeThreads" should {
+    "work" in {
+      val group1 = new ThreadGroup("test")
+      val group2 = new ThreadGroup(group1, "test-child")
+
+      try {
+        assert(JvmExecutor.activeThreads(group1).isEmpty)
+
+        assert(JvmExecutor.activeThreads(group2).isEmpty)
+
+        @volatile
+        var done = false
+        val started1 = Promise[Unit]
+        val started2 = Promise[Unit]
+
+        val thread1 =
+          new Thread(group1, { () =>
+            started1.success(())
+            while (!done) {
+              Thread.sleep(10)
+            }
+          })
+
+        val thread2 =
+          new Thread(group2, { () =>
+            started2.success(())
+            while (!done) {
+              Thread.sleep(10)
+            }
+          })
+
+        thread1.start()
+        thread2.start()
+
+        assert(JvmExecutor.activeThreads(group1) == Set(thread1, thread2))
+        assert(JvmExecutor.activeThreads(group2) == Set(thread2))
+
+        done = true
+        thread1.join()
+        thread2.join()
+
+        assert(JvmExecutor.activeThreads(group1) == Set.empty)
+        assert(JvmExecutor.activeThreads(group2) == Set.empty)
+      } finally {
+        group2.destroy()
+        group1.destroy()
+      }
+    }
+  }
+
+  "memberOfThreadGroup" should {
+    "work" in {
+      val parentA = new ThreadGroup("parentA")
+      val parentB = new ThreadGroup("parentB")
+      val childA = new ThreadGroup(parentA, "childA")
+      val childB = new ThreadGroup(parentB, "childB")
+
+      try {
+        assert(!JvmExecutor.memberOfThreadGroup(null, null))
+
+        assert(JvmExecutor.memberOfThreadGroup(parentA, parentA))
+        assert(JvmExecutor.memberOfThreadGroup(parentB, parentB))
+
+        assert(!JvmExecutor.memberOfThreadGroup(parentA, parentB))
+        assert(!JvmExecutor.memberOfThreadGroup(parentB, parentA))
+
+        assert(JvmExecutor.memberOfThreadGroup(childA, parentA))
+        assert(!JvmExecutor.memberOfThreadGroup(parentA, childA))
+        assert(!JvmExecutor.memberOfThreadGroup(childB, parentA))
+
+        assert(JvmExecutor.memberOfThreadGroup(childB, parentB))
+        assert(!JvmExecutor.memberOfThreadGroup(parentB, childB))
+        assert(!JvmExecutor.memberOfThreadGroup(childA, parentB))
+      } finally {
+        childA.destroy()
+        childB.destroy()
+        parentA.destroy()
+        parentB.destroy()
+      }
+    }
+  }
+
+  "removeShutdownHooks" should {
+    "work" in {
+      val value = new java.util.concurrent.atomic.AtomicInteger(0)
+      val group = new ThreadGroup("test")
+      val group2 = new ThreadGroup("test2")
+      @volatile
+      var hook1: Thread = null
+      @volatile
+      var hook2: Thread = null
+      @volatile
+      var hook3: Thread = null
+
+      try {
+        val t1 = new Thread(group, { () =>
+          hook1 = sys.addShutdownHook {
+            value.addAndGet(1)
+          }
+        })
+
+        val t2 = new Thread(group, { () =>
+          hook2 = sys.addShutdownHook {
+            value.addAndGet(2)
+          }
+        })
+
+        val t3 = new Thread(group2, { () =>
+          hook3 = sys.addShutdownHook {
+            value.addAndGet(3)
+          }
+        })
+
+        t1.start()
+        t2.start()
+        t3.start()
+        t1.join()
+        t2.join()
+        t3.join()
+
+        val hooks1 = JvmExecutor.removeShutdownHooks(group)
+        val hooks2 = JvmExecutor.removeShutdownHooks(group)
+
+        assert(hooks1 == Set(hook1, hook2))
+        assert(hooks2 == Set.empty)
+        assert(value.get == 0)
+
+        hooks1.foreach(_.start())
+        hooks1.foreach(_.join())
+
+        assert(value.get == 3)
+
+        val hooks3 = JvmExecutor.removeShutdownHooks(group2)
+        val hooks4 = JvmExecutor.removeShutdownHooks(group2)
+
+        assert(hooks3 == Set(hook3))
+        assert(hooks4 == Set.empty)
+
+        hooks3.foreach(_.start())
+        hooks3.foreach(_.join())
+
+        assert(value.get == 6)
+      } finally {
+        group.destroy()
+        group2.destroy()
+      }
     }
   }
 }
