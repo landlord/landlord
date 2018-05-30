@@ -1,18 +1,12 @@
 package example;
 
-import java.io.IOException;
-
 /**
  * An example used to demonstrate addShutdownHook behavior when running in
  * landlordd.
  */
 public class Shutdown {
-    public static void main(String[] args) throws IOException {
-        try {
-            Runtime.getRuntime().addShutdownHook(new Thread(() -> System.out.println("Shutdown trapped")));
-        } catch (SecurityException ignored) {
-            // An exception will be thrown when running via landlord started with --prevent-shutdown-hooks
-        }
+    public static void main(String[] args) {
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> System.out.println("Shutdown trapped")));
 
         System.exit(0);
     }

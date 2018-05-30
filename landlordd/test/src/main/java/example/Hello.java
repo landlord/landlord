@@ -25,6 +25,12 @@ public class Hello {
             }
         }).start();
 
+        // Landlord will invoke your shutdown hooks when it unloads your program.
+
+        Runtime.getRuntime().addShutdownHook(
+                new Thread(() -> System.out.println("Good Bye!"))
+        );
+
         int i = 0;
 
         for (String arg: args) {

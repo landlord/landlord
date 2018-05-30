@@ -21,7 +21,6 @@ object Main extends App {
   case class Config(
       bindDirPath: Path = Paths.get("/var/run/landlord"),
       exitTimeout: FiniteDuration = 12.seconds,
-      preventShutdownHooks: Boolean = false,
       outputDrainTimeAtExit: FiniteDuration = 100.milliseconds,
       processDirPath: Path = Files.createTempDirectory("jvm-executor"),
       stdinTimeout: FiniteDuration = 1.hour,
@@ -46,10 +45,6 @@ object Main extends App {
             .getOrElse(throw new IllegalArgumentException("Bad time - expecting a finite duration such as 10s: " + x))
       )
     }.text("The time to wait for a process to exit before interrupting. Defaults to 12 seconds (12s).")
-
-    opt[Unit]("prevent-shutdown-hooks").action { (_, c) =>
-      c.copy(preventShutdownHooks = true)
-    }.text("When set, a security exception will be thrown if shutdown hooks are detected within a process. Defaults to false, which then just warns on stderr.")
 
     opt[String]("output-drain-time-at-exit").action { (x, c) =>
       c.copy(
@@ -216,7 +211,7 @@ object Main extends App {
               val processId = nextProcessId.getAndIncrement()
               processId -> JvmExecutor.props(
                 processId,
-                properties, securityManager, config.useDefaultSecurityManager, config.preventShutdownHooks,
+                properties, securityManager, config.useDefaultSecurityManager,
                 stdin, config.stdinTimeout, stdout, stderr,
                 in, out,
                 config.exitTimeout, config.outputDrainTimeAtExit,
