@@ -4,6 +4,7 @@ import akka.util.ByteString
 import java.io.{ ByteArrayInputStream, ByteArrayOutputStream, PrintStream }
 import java.util.Properties
 import org.scalatest._
+import scala.collection.JavaConverters._
 
 class ThreadGroupMappingsSpec extends WordSpec with Matchers {
 
@@ -104,6 +105,16 @@ class ThreadGroupMappingsSpec extends WordSpec with Matchers {
       newProperties.setProperty("user.dir", "/xyz")
       threadGroupProperties.init(newProperties)
       threadGroupProperties.getProperty("user.dir", "some-default") shouldBe "/xyz"
+
+      val entries =
+        threadGroupProperties
+          .entrySet()
+          .asScala
+          .toVector
+          .map(e => e.getKey.toString -> e.getValue.toString)
+          .toMap
+
+      assert(entries.get("user.dir").contains("/xyz"))
     }
   }
 

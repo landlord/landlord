@@ -1,9 +1,10 @@
 package com.github.huntc.landlord
 
-import java.io.{ FileDescriptor, IOException, InputStream, PrintStream }
+import java.io.{ FileDescriptor, IOException, InputStream, PrintStream, PrintWriter }
 import java.net.InetAddress
 import java.security.Permission
-import java.util.Properties
+import java.util.function.BiConsumer
+import java.util.{ Collection => JCollection, Enumeration => JEnumeration, Map => JMap, Properties, Set => JSet }
 
 import scala.collection.immutable.HashMap
 
@@ -119,8 +120,62 @@ class ThreadGroupProperties(props: Properties)
 
   protected val _fallback: Properties = props
 
+  override def elements(): JEnumeration[AnyRef] =
+    super.get.elements()
+
+  override def contains(value: Any): Boolean =
+    super.get.contains(value)
+
+  override def containsKey(key: Any): Boolean =
+    super.get.containsKey(key)
+
+  override def containsValue(value: Any): Boolean =
+    super.get.containsValue(value)
+
+  override def entrySet(): JSet[JMap.Entry[AnyRef, AnyRef]] =
+    super.get.entrySet()
+
+  override def forEach(action: BiConsumer[_ >: AnyRef, _ >: AnyRef]): Unit =
+    super.get.forEach(action)
+
+  override def get(key: Any): AnyRef =
+    super.get.get(key)
+
+  override def getOrDefault(key: Any, defaultValue: AnyRef): AnyRef =
+    super.get.getOrDefault(key, defaultValue)
+
   override def getProperty(key: String): String =
-    get.getProperty(key)
+    super.get.getProperty(key)
+
+  override def getProperty(key: String, defaultValue: String): String =
+    super.get.getProperty(key, defaultValue)
+
+  override def isEmpty: Boolean =
+    super.get.isEmpty
+
+  override def keys(): JEnumeration[AnyRef] =
+    super.get.keys()
+
+  override def keySet(): JSet[AnyRef] =
+    super.get.keySet()
+
+  override def list(out: PrintStream): Unit =
+    super.get.list(out)
+
+  override def list(out: PrintWriter): Unit =
+    super.get.list(out)
+
+  override def propertyNames(): JEnumeration[_] =
+    super.get.propertyNames()
+
+  override def size(): Int =
+    super.get.size()
+
+  override def stringPropertyNames(): JSet[String] =
+    super.get.stringPropertyNames()
+
+  override def values(): JCollection[AnyRef] =
+    super.get.values()
 }
 
 class ThreadGroupSecurityManager(s: SecurityManager)
