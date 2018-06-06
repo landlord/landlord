@@ -1,11 +1,12 @@
 package com.github.huntc.landlord
 
+import java.net.URI
 import java.nio.ByteOrder
 
 import akka.{ Done, NotUsed }
 import akka.actor.{ Actor, ActorRef, ActorSelection, ActorSystem, CoordinatedShutdown, Props, Terminated }
 import akka.pattern.ask
-import akka.stream.scaladsl.{ Flow, Keep, Sink, Source }
+import akka.stream.scaladsl.{ Flow, Keep, Sink, Source, Tcp }
 import akka.stream.{ ActorMaterializer, Materializer }
 import akka.util.ByteString
 import java.nio.file.{ Files, Path, Paths }
@@ -18,8 +19,10 @@ import scala.concurrent.duration._
 import scala.util.{ Failure, Success }
 
 object Main extends App {
+  val DefaultHost = new URI("unix:///var/run/landlord/landlordd.sock")
+
   case class Config(
-      bindDirPath: Path = Paths.get("/var/run/landlord"),
+      hosts: Seq[URI] = List.empty,
       exitTimeout: FiniteDuration = 12.seconds,
       outputDrainTimeAtExit: FiniteDuration = 100.milliseconds,
       processDirPath: Path = Files.createTempDirectory("jvm-executor"),
@@ -33,9 +36,25 @@ object Main extends App {
     help("help").text("prints this usage text")
     version("version").text("prints version text")
 
-    opt[String]("bind-dir-path").action { (x, c) =>
-      c.copy(bindDirPath = Paths.get(x))
-    }.text("The Unix Domain Socket path to listen on.")
+    opt[String]("host").abbr("H").unbounded().action { (x, c) =>
+      c.copy(hosts = new URI(x) +: c.hosts)
+    }
+      .validate { x =>
+        val host = new URI(x)
+        if (host.getScheme == "unix") {
+          val bindDirParentPath = Paths.get(host.getPath).getParent
+          val bindDirParentFile = bindDirParentPath.toFile
+          if (bindDirParentFile.exists && bindDirParentFile.canWrite)
+            success
+          else
+            failure("Unix socket directory must exist with write permission: " + bindDirParentPath)
+        } else if (host.getScheme == "tcp") {
+          success
+        } else {
+          failure("Invalid bind address format: " + host.getScheme)
+        }
+      }
+      .text(s"Zero or more Unix Domain Socket paths and TCP ports to listen on as unix://{path} and tcp://{host}:{port} URIs. Defaults to $DefaultHost.")
 
     opt[String]("exit-timeout").action { (x, c) =>
       c.copy(
@@ -57,7 +76,7 @@ object Main extends App {
 
     opt[String]("process-dir-path").action { (x, c) =>
       c.copy(processDirPath = Paths.get(x))
-    }.text("The path to use for the working directory for the process.")
+    }.text("The path to use for the working directory for the process. Defaults to a JVM determined temporary directory.")
 
     opt[String]("stdin-timeout").action { (x, c) =>
       c.copy(
@@ -70,15 +89,7 @@ object Main extends App {
 
     opt[Boolean]("use-default-security-manager").action { (x, c) =>
       c.copy(useDefaultSecurityManager = x)
-    }.text("When true, the JVM's default security manager will be used for processes. The option defaults to false.")
-
-    checkConfig { c =>
-      val bindDirFile = c.bindDirPath.toFile
-      if (bindDirFile.exists && bindDirFile.canWrite)
-        Right(())
-      else
-        Left("Unix socket directory must exist with write permission: " + c.bindDirPath)
-    }
+    }.text("When true, the JVM's default security manager will be used for processes. Defaults to false.")
   }
 
   object JvmExecutorReaper {
@@ -179,7 +190,15 @@ object Main extends App {
   /*
    * Main entry point.
    */
-  parser.parse(args, Config()) match {
+  val qualifiedConfig =
+    parser.parse(args, Config()) match {
+      case Some(config) if config.hosts.isEmpty =>
+        parser.parse(List.empty, config.copy(hosts = List(DefaultHost)))
+      case otherConfig =>
+        otherConfig
+    }
+
+  qualifiedConfig match {
     case Some(config) =>
       val stdin = new ThreadGroupInputStream(System.in)
       val stdout = new ThreadGroupPrintStream(System.out)
@@ -201,52 +220,83 @@ object Main extends App {
 
       val reaper = system.actorOf(JvmExecutorReaper.props, "reaper")
 
-      val binding =
-        UnixDomainSocket()
-          .bind(config.bindDirPath.resolve("landlordd.sock").toFile)
-          .toMat(Sink.foreach { connection =>
-            system.log.debug("New connection {}", connection)
+      def launchInfoOp(in: Source[ByteString, NotUsed], out: Promise[Source[ByteString, NotUsed]]): (Int, Props) = {
+        val processId = nextProcessId.getAndIncrement()
+        processId -> JvmExecutor.props(
+          processId,
+          properties, securityManager, config.useDefaultSecurityManager,
+          stdin, config.stdinTimeout, stdout, stderr,
+          in, out,
+          config.exitTimeout, config.outputDrainTimeAtExit,
+          config.processDirPath.resolve(processId.toString)
+        )
+      }
 
-            def launchInfoOp(in: Source[ByteString, NotUsed], out: Promise[Source[ByteString, NotUsed]]): (Int, Props) = {
-              val processId = nextProcessId.getAndIncrement()
-              processId -> JvmExecutor.props(
-                processId,
-                properties, securityManager, config.useDefaultSecurityManager,
-                stdin, config.stdinTimeout, stdout, stderr,
-                in, out,
-                config.exitTimeout, config.outputDrainTimeAtExit,
-                config.processDirPath.resolve(processId.toString)
-              )
+      def sendKillOp(jvmExecutor: ActorSelection, signal: Int): Unit =
+        jvmExecutor ! JvmExecutor.SignalProcess(signal)
+
+      config.hosts.foreach {
+        case host if host.getScheme == "unix" =>
+          val hostPath = Paths.get(host.getPath)
+          val binding =
+            UnixDomainSocket().bind(hostPath.toFile)
+              .toMat(Sink.foreach { connection =>
+                system.log.debug("New unix connection {}", connection)
+
+                connection.handleWith(controlFlow(reaper, launchInfoOp, sendKillOp))
+
+              })(Keep.left)
+              .run
+
+          import system.dispatcher
+
+          binding
+            .onComplete {
+              case Success(_) =>
+                system.log.info("Unix ready on {}", hostPath)
+              case Failure(e) =>
+                system.log.error(e, "Exiting because of {}", hostPath)
+                System.exit(1)
             }
 
-            def sendKillOp(jvmExecutor: ActorSelection, signal: Int): Unit =
-              jvmExecutor ! JvmExecutor.SignalProcess(signal)
+          CoordinatedShutdown(system).addTask(
+            CoordinatedShutdown.PhaseServiceUnbind, "unbindUnixSockets") { () =>
+              binding.flatMap(_.unbind().map(_ => Done))
+            }
 
-            connection.handleWith(controlFlow(reaper, launchInfoOp, sendKillOp))
+        case host if host.getScheme == "tcp" =>
+          val binding =
+            Tcp().bind(host.getHost, host.getPort)
+              .toMat(Sink.foreach { connection =>
+                system.log.debug("New tcp connection {}", connection)
 
-          })(Keep.left)
-          .run
+                connection.handleWith(controlFlow(reaper, launchInfoOp, sendKillOp))
 
-      import system.dispatcher
+              })(Keep.left)
+              .run
 
-      binding
-        .onComplete {
-          case Success(_) =>
-            system.log.info("Ready.")
-          case Failure(e) =>
-            system.log.error(e, "Exiting")
-            system.terminate()
-        }
+          import system.dispatcher
+
+          binding
+            .onComplete {
+              case Success(_) =>
+                system.log.info("TCP ready on {}:{}", host.getHost, host.getPort)
+              case Failure(e) =>
+                system.log.error(e, "Exiting because of {}:{}", host.getHost, host.getPort)
+                System.exit(1)
+            }
+
+          CoordinatedShutdown(system).addTask(
+            CoordinatedShutdown.PhaseServiceUnbind, "unbindTcpSockets") { () =>
+              binding.flatMap(_.unbind().map(_ => Done))
+            }
+        case _ =>
+      }
 
       CoordinatedShutdown(system).addTask(
         CoordinatedShutdown.PhaseBeforeActorSystemTerminate, "stopJvmExecutors") { () =>
           reaper.ask(JvmExecutorReaper.Shutdown)(config.exitTimeout)
             .mapTo[Done]
-        }
-
-      CoordinatedShutdown(system).addTask(
-        CoordinatedShutdown.PhaseServiceUnbind, "unbindUnixDomainSocket") { () =>
-          binding.flatMap(_.unbind().map(_ => Done))
         }
 
     case None =>
