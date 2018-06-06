@@ -2,11 +2,11 @@ extern crate landlord;
 
 use landlord::args::*;
 use landlord::bindings::*;
-use std::{env, io, process, str};
 use std::io::prelude::*;
 use std::net::TcpStream;
 use std::os::unix::net::UnixStream;
 use std::sync::mpsc::*;
+use std::{env, io, process, str};
 
 const VERSION: &'static str = env!("CARGO_PKG_VERSION");
 
@@ -27,7 +27,7 @@ where options include:
 
 fn main() {
     let args: Vec<String> = env::args().collect();
-    let parsed = parse_java_args(&args[1..].to_vec());
+    let parsed = parse_java_args(&args[1..]);
 
     if parsed.version {
         eprintln!("landlord version \"{}\"", VERSION);
@@ -38,17 +38,23 @@ fn main() {
             ExecutionMode::Class {
                 ref class,
                 ref args,
-            } => {
-                match parsed.socket {
-                    Socket::Unix(path)   => {
-                        handle_execute_class(&parsed.cp, class, args, &parsed.props, || UnixStream::connect(&path))
-                    }
+            } => match parsed.socket {
+                Socket::Unix(path) => handle_execute_class(
+                    parsed.cp.as_slice(),
+                    class,
+                    args,
+                    parsed.props.as_slice(),
+                    || UnixStream::connect(&path),
+                ),
 
-                    Socket::Tcp(address) => {
-                        handle_execute_class(&parsed.cp, class, args, &parsed.props, || TcpStream::connect(&address))
-                    }
-                }
-            }
+                Socket::Tcp(address) => handle_execute_class(
+                    parsed.cp.as_slice(),
+                    class,
+                    args,
+                    parsed.props.as_slice(),
+                    || TcpStream::connect(&address),
+                ),
+            },
 
             ExecutionMode::Exit { code } => {
                 process::exit(code);
@@ -79,11 +85,17 @@ fn main() {
     }
 }
 
-fn handle_execute_class<IO, NewS>(cp: &Vec<String>, class: &String, args: &Vec<String>, props: &Vec<(String, String)>, mut new_socket: NewS)
-where
+fn handle_execute_class<IO, NewS, S>(
+    cp: &[S],
+    class: &S,
+    args: &[S],
+    props: &[(S, S)],
+    mut new_socket: NewS,
+) where
     IO: IOSocket + Read + Send + Write + 'static,
-    NewS: FnMut() -> io::Result<IO> {
-
+    NewS: FnMut() -> io::Result<IO>,
+    S: AsRef<str>,
+{
     match new_socket() {
         Err(ref mut e) => {
             eprintln!("landlord: failed to connect to socket: {:?}", e);
@@ -94,7 +106,7 @@ where
         Ok(mut stream) => {
             let (tx, rx) = channel();
 
-            let result = install_fs_and_start(&cp, &props, class, args, &mut stream)
+            let result = install_fs_and_start(cp, props, class, args, &mut stream)
                 .and_then(|pid| stream.try_clone().map(|stream_writer| (pid, stream_writer)))
                 .and_then(|(pid, mut stream_writer)| {
                     spawn_and_handle_signals(tx.clone());

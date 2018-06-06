@@ -1,11 +1,11 @@
 use chan_signal::{notify, Signal};
 use libc;
 use proto::*;
-use std::{fs, io, marker, net, path, process, thread};
-use std::net::TcpStream;
 use std::io::prelude::*;
+use std::net::TcpStream;
 use std::os::unix::net::UnixStream;
 use std::sync::mpsc::*;
+use std::{fs, io, marker, net, path, process, thread};
 use tar::Builder;
 
 /// Binds everything together and ensures that events received from a given `reader` will
@@ -18,7 +18,7 @@ pub fn handle_events<NewS, IO>(
 ) -> io::Result<i32>
 where
     NewS: FnMut() -> io::Result<IO>,
-    IO: IOSocket + Read + Write
+    IO: IOSocket + Read + Write,
 {
     let mut stdout = io::stdout();
     let mut stderr = io::stderr();
@@ -34,7 +34,6 @@ where
         } else {
             socket.write_all(&bs)
         }
-
     };
     let session_writer = |bs: Vec<u8>| new_socket().and_then(|ref mut s| s.write_all(&bs));
     let std_out = |bs: Vec<u8>| stdout.write_all(&bs);
@@ -175,7 +174,10 @@ pub fn spawn_and_handle_stdin(sender: Sender<Input>) {
 
 /// Spawns a thread and reads data from the provided `stream`. The actual logic
 /// of how much to read is done via the read_handler function.
-pub fn spawn_and_handle_stream_read<IO>(mut socket: IO, sender: Sender<Input>) where IO: IOSocket + Read + Send + Write + 'static {
+pub fn spawn_and_handle_stream_read<IO>(mut socket: IO, sender: Sender<Input>)
+where
+    IO: IOSocket + Read + Send + Write + 'static,
+{
     thread::spawn(move || {
         let s = &mut socket;
         let r = |n: usize| read_bytes(s, n);
@@ -197,20 +199,24 @@ pub fn spawn_and_handle_stream_read<IO>(mut socket: IO, sender: Sender<Input>) w
 /// Writes the provided `class_path` to the provided `stream` and starts the process. Returns
 /// the process id (from landlordd's perpsective). Upon successful completion, the process
 /// is running and any data subsequently written to `stream` is stdin.
-pub fn install_fs_and_start<IO>(
-    class_path: &Vec<String>,
-    props: &Vec<(String, String)>,
-    class: &String,
-    args: &Vec<String>,
+pub fn install_fs_and_start<IO, S>(
+    class_path: &[S],
+    props: &[(S, S)],
+    class: &S,
+    args: &[S],
     socket: &mut IO,
-) -> io::Result<i32> where IO: IOSocket + Read + Write {
+) -> io::Result<i32>
+where
+    IO: IOSocket + Read + Write,
+    S: AsRef<str>,
+{
     // given a list of class path entries, these are written to the tar via their position in
     // the vector. Meaning the first entry will be named "0", second "1", and so on. This
     // allows the user to specify any combination of directories and files without us having
     // to find some common parent path string.
 
-    let cp_with_names = class_path_with_names(&class_path);
-    let descriptor = app_cmdline(&cp_with_names, &props, &class, &args);
+    let cp_with_names = class_path_with_names(class_path);
+    let descriptor = app_cmdline(cp_with_names.as_slice(), props, class, args);
 
     socket.write_all(descriptor.as_bytes()).and_then(|_| {
         let tar_padding_writer = BlockSizeWriter::new(socket, 10240);
@@ -314,7 +320,10 @@ impl<W: Write> BlockSizeWriter<W> {
 
 /// Exposes underlying shutdown and try_clone functions
 /// for the types of sockets we support, i.e. UDS and TCP.
-pub trait IOSocket where Self: marker::Sized {
+pub trait IOSocket
+where
+    Self: marker::Sized,
+{
     fn shutdown(&self, how: net::Shutdown) -> io::Result<()>;
     fn try_clone(&self) -> io::Result<Self>;
 }

@@ -22,16 +22,12 @@ pub struct JavaArgs {
     pub version: bool,
 }
 
-pub fn parse_java_args(args: &Vec<String>) -> JavaArgs {
+pub fn parse_java_args<S: AsRef<str>>(args: &[S]) -> JavaArgs {
     // We want to aim to be a drop-in replacement for java, so we have to roll our own arg parser
     // because DocOpt/Clap/et al don't have the required features to match the rather strange java
     // arguments.
 
-    let noop_flags = vec![
-        "-server".to_string(),
-        "-d64".to_string(),
-        "-d32".to_string(),
-    ];
+    let noop_flags = ["-server", "-d64", "-d32"];
 
     let mut jargs = JavaArgs {
         cp: vec![".".to_string()],
@@ -42,7 +38,7 @@ pub fn parse_java_args(args: &Vec<String>) -> JavaArgs {
         version: false,
     };
 
-    let mut iter = args.iter();
+    let mut iter = args.iter().map(|r| r.as_ref());
 
     loop {
         let next = iter.next();
@@ -110,9 +106,10 @@ pub fn parse_java_args(args: &Vec<String>) -> JavaArgs {
                     } else if socket.starts_with("unix://") {
                         jargs.socket = Socket::Unix(socket[7..].to_string());
                     } else {
-                        jargs
-                            .errors
-                            .push(format!("{} must begin with \"tcp://\" or \"unix://\"", flag))
+                        jargs.errors.push(format!(
+                            "{} must begin with \"tcp://\" or \"unix://\"",
+                            flag
+                        ))
                     }
                 } else {
                     jargs
@@ -133,7 +130,7 @@ pub fn parse_java_args(args: &Vec<String>) -> JavaArgs {
                 }
             }
 
-            Some(flag) if noop_flags.contains(flag) => {}
+            Some(flag) if noop_flags.contains(&flag) => {}
 
             Some(flag) => jargs.errors.push(format!("Unrecognized option: {}", flag)),
 
@@ -147,7 +144,7 @@ pub fn parse_java_args(args: &Vec<String>) -> JavaArgs {
 #[test]
 fn test_parse_java_args_help() {
     assert_eq!(
-        parse_java_args(&vec!["-?".to_string()]),
+        parse_java_args(&["-?"]),
         JavaArgs {
             cp: vec![".".to_string()],
             errors: vec![],
@@ -159,7 +156,7 @@ fn test_parse_java_args_help() {
     );
 
     assert_eq!(
-        parse_java_args(&vec!["-help".to_string()]),
+        parse_java_args(&["-help"]),
         JavaArgs {
             cp: vec![".".to_string()],
             errors: vec![],
@@ -174,7 +171,7 @@ fn test_parse_java_args_help() {
 #[test]
 fn test_parse_java_version() {
     assert_eq!(
-        parse_java_args(&vec!["-version".to_string()]),
+        parse_java_args(&["-version"]),
         JavaArgs {
             cp: vec![".".to_string()],
             errors: vec![],
@@ -189,11 +186,7 @@ fn test_parse_java_version() {
 #[test]
 fn test_parse_java_showversion() {
     assert_eq!(
-        parse_java_args(&vec![
-            "-showversion".to_string(),
-            "-jar".to_string(),
-            "test.jar".to_string(),
-        ]),
+        parse_java_args(&["-showversion", "-jar", "test.jar"]),
         JavaArgs {
             cp: vec![".".to_string()],
             errors: vec![],
@@ -211,12 +204,7 @@ fn test_parse_java_showversion() {
 #[test]
 fn test_parse_java_jar() {
     assert_eq!(
-        parse_java_args(&vec![
-            "-jar".to_string(),
-            "test.jar".to_string(),
-            "arg1".to_string(),
-            "arg2".to_string(),
-        ]),
+        parse_java_args(&["-jar", "test.jar", "arg1", "arg2"]),
         JavaArgs {
             cp: vec![".".to_string()],
             errors: vec![],
@@ -234,8 +222,11 @@ fn test_parse_java_jar() {
 #[test]
 fn test_parse_tcp_socket() {
     assert_eq!(
-        parse_java_args(&vec!["-socket".to_string(), "tcp://1.2.3.4:5678".to_string(), "HelloWorld".to_string()]).socket,
-
+        parse_java_args(&vec![
+            "-socket".to_string(),
+            "tcp://1.2.3.4:5678".to_string(),
+            "HelloWorld".to_string(),
+        ]).socket,
         Socket::Tcp("1.2.3.4:5678".to_string())
     );
 }
@@ -243,19 +234,19 @@ fn test_parse_tcp_socket() {
 #[test]
 fn test_all() {
     assert_eq!(
-        parse_java_args(&vec![
-            "-Dkey1=value1".to_string(),
-            "-Dkey2=value2".to_string(),
-            "-d32".to_string(),
-            "-d64".to_string(),
-            "-server".to_string(),
-            "-socket".to_string(),
-            "unix:///dev/null".to_string(),
-            "-cp".to_string(),
-            "/lib:/usr/lib".to_string(),
-            "com.hello.Example".to_string(),
-            "myarg one".to_string(),
-            "myargtwo".to_string(),
+        parse_java_args(&[
+            "-Dkey1=value1",
+            "-Dkey2=value2",
+            "-d32",
+            "-d64",
+            "-server",
+            "-socket",
+            "unix:///dev/null",
+            "-cp",
+            "/lib:/usr/lib",
+            "com.hello.Example",
+            "myarg one",
+            "myargtwo",
         ]),
         JavaArgs {
             cp: vec!["/lib".to_string(), "/usr/lib".to_string()],
@@ -277,10 +268,7 @@ fn test_all() {
 #[test]
 fn test_invalid_flags() {
     assert_eq!(
-        parse_java_args(&vec![
-            "-hello-world".to_string(),
-            "com.hello.Example".to_string(),
-        ]),
+        parse_java_args(&["-hello-world", "com.hello.Example"]),
         JavaArgs {
             cp: vec![".".to_string()],
             errors: vec!["Unrecognized option: -hello-world".to_string()],

@@ -154,46 +154,52 @@ pub fn read_pid_handler(stream: &mut Read) -> Option<i32> {
 }
 
 /// Creates the first line of data that is sent to landlordd when loading an app.
-pub fn app_cmdline(
-    class_path_with_names: &Vec<(String, String)>,
-    props: &Vec<(String, String)>,
-    class: &String,
-    args: &Vec<String>,
+pub fn app_cmdline<S: AsRef<str>>(
+    class_path_with_names: &[(String, String)],
+    props: &[(S, S)],
+    class: &S,
+    args: &[S],
 ) -> String {
     let props = props
         .iter()
-        .map(|&(ref n, ref v)| format!("-D{}={}", n, v))
+        .map(|&(ref n, ref v)| format!("-D{}={}", n.as_ref(), v.as_ref()))
         .collect::<Vec<String>>()
         .join("\u{0000}");
 
     format!(
         "l{}-cp\u{0000}{}\u{0000}{}{}\n",
         if props == "" {
-            "".to_string()
+            props
         } else {
             format!("{}\u{0000}", props)
         },
         class_path_with_names
             .iter()
-            .map(|ref e| e.1.to_string())
-            .collect::<Vec<String>>()
+            .map(|&(_, ref name)| name.as_ref())
+            .collect::<Vec<&str>>()
             .join(":"),
-        class,
+        class.as_ref(),
         if args.is_empty() {
             format!("")
         } else {
-            format!("\u{0000}{}", args.join("\u{0000}"))
+            format!(
+                "\u{0000}{}",
+                args.iter()
+                    .map(|a| a.as_ref())
+                    .collect::<Vec<&str>>()
+                    .join("\u{0000}")
+            )
         }
     )
 }
 
 /// Given class path entries, returns a new vector containing entries
 /// as a tuple, each element: (path, name to store in tar file)
-pub fn class_path_with_names(class_path: &Vec<String>) -> Vec<(String, String)> {
+pub fn class_path_with_names<S: AsRef<str>>(class_path: &[S]) -> Vec<(String, String)> {
     class_path
         .iter()
         .enumerate()
-        .map(|(i, e)| (e.to_string(), format!("{}", i)))
+        .map(|(ref i, e)| (e.as_ref().to_string(), i.to_string()))
         .collect()
 }
 
@@ -222,13 +228,13 @@ fn encode_i32(value: i32) -> io::Result<Vec<u8>> {
 fn test_app_cmdline_no_args() {
     assert_eq!(
         app_cmdline(
-            &vec![
+            &[
                 ("/test1/one".to_string(), "0".to_string()),
                 ("/test1/two".to_string(), "1".to_string()),
             ],
-            &vec![],
-            &"com.example.HelloWorld1".to_string(),
-            &vec![]
+            &[],
+            &"com.example.HelloWorld1",
+            &[]
         ),
         "l-cp\u{0000}0:1\u{0000}com.example.HelloWorld1\n".to_string()
     )
@@ -238,16 +244,15 @@ fn test_app_cmdline_no_args() {
 fn test_app_cmdline_with_args() {
     assert_eq!(
         app_cmdline(
-            &vec![
+            &[
                 ("/test2/one".to_string(), "0".to_string()),
                 ("/test2/two".to_string(), "1".to_string()),
             ],
-            &vec![],
-            &"com.example.HelloWorld2".to_string(),
-            &vec!["argone".to_string(), "arg two".to_string()]
-        ),
+            &[],
+            &"com.example.HelloWorld2",
+            &["argone", "arg two"]
+        ).as_str(),
         "l-cp\u{0000}0:1\u{0000}com.example.HelloWorld2\u{0000}argone\u{0000}arg two\n"
-            .to_string()
     )
 }
 
@@ -255,23 +260,23 @@ fn test_app_cmdline_with_args() {
 fn test_app_cmdline_with_args_props() {
     assert_eq!(
         app_cmdline(
-            &vec![
+            &[
                 ("/test2/one".to_string(), "0".to_string()),
                 ("/test2/two".to_string(), "1".to_string()),
             ],
-            &vec![("one".to_string(), "#1!".to_string()), ("two".to_string(), "#2!".to_string())],
-            &"com.example.HelloWorld2".to_string(),
-            &vec!["argone".to_string(), "arg two".to_string()]
-        ),
+            &[("one", "#1!"), ("two", "#2!")],
+            &"com.example.HelloWorld2",
+            &["argone", "arg two"]
+        ).as_str(),
+
         "l-Done=#1!\u{0000}-Dtwo=#2!\u{0000}-cp\u{0000}0:1\u{0000}com.example.HelloWorld2\u{0000}argone\u{0000}arg two\n"
-            .to_string()
     )
 }
 
 #[test]
 fn test_class_path_with_names() {
     assert_eq!(
-        class_path_with_names(&vec!["/test/one".to_string(), "/test/two".to_string()]),
+        class_path_with_names(&["/test/one", "/test/two"]),
         vec![
             ("/test/one".to_string(), "0".to_string()),
             ("/test/two".to_string(), "1".to_string()),
