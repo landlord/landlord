@@ -1,4 +1,5 @@
 import com.typesafe.sbt.SbtScalariform.ScalariformKeys
+import com.typesafe.sbt.packager.docker._
 import scalariform.formatter.preferences._
 
 import Dependencies._
@@ -49,7 +50,10 @@ lazy val daemon = project
     executableScriptName := "landlordd",
     packageName in Universal := "landlord",
     dockerBaseImage := "openjdk:8-jre-alpine",
-    dockerExposedPorts := List(9000)
+    dockerCommands += Cmd("USER", "root"),
+    dockerCommands += Cmd("RUN", "mkdir", "-p", "/var/run/landlord"),
+    dockerCommands += Cmd("RUN", "chown", daemonUser.value, "/var/run/landlord"),
+    dockerCommands += Cmd("USER", daemonUser.value)
   )
   .enablePlugins(AshScriptPlugin, JavaAppPackaging)
 

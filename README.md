@@ -38,6 +38,13 @@ To get started with Landlord, you'll need [sbt](https://www.scala-sbt.org/) and 
 
 2) Start `landlordd`
 
+Create a shared folder for hosting Unix Domain Socket files:
+
+```bash
+sudo mkdir /var/run/landlord
+sudo chown $LOGNAME /var/run/landlord
+```
+
 Next, start the `landlordd` daemon process.
 
 ```bash
@@ -51,7 +58,7 @@ In another terminal, let's try the first example program, `Hello.java`. This pro
 First, with the `java` command, i.e. not using Landlord.
 
 ```bash
-echo Testing... | java -cp landlordd/test/target/scala-2.12/classes "-Dgreeting=Welcome!" example.Hello ArgOne ArgTwo
+echo Testing... | java -cp landlordd/test/target/scala-2.12/classes "-Dgreeting=Welcome" example.Hello ArgOne ArgTwo
 ```
 
 ```
@@ -64,7 +71,7 @@ Testing...
 Next, with the `landlord` command. This will submit the program to `landlordd` for execution.
 
 ```bash
-echo Testing... | landlord/target/release/landlord -cp landlordd/test/target/scala-2.12/classes "-Dgreeting=Welcome!" example.Hello ArgOne ArgTwo
+echo Testing... | landlord/target/release/landlord -cp landlordd/test/target/scala-2.12/classes "-Dgreeting=Welcome" example.Hello ArgOne ArgTwo
 ```
 
 ```
@@ -88,7 +95,7 @@ java -cp landlordd/test/target/scala-2.12/classes example.Count || echo "Exited 
 Iteration #0
 Iteration #1
 Iteration #2
-^CExited with 128
+^CExited with 130
 ```
 
 Next, let's try with the `landlord` command. Again, press `CTRL-C` after a few seconds.
@@ -183,68 +190,118 @@ Note that in the case of long-lived programs (the most typical scenario for a mi
 ## landlordd
 You can run as many `landlordd` daemons as your system will allow. Quite often though, you should just need one.
 
-## Building landlordd
-1. Build the daemon:
+## Docker packaging
 
-```bash
-cd landlord/landlordd/
-sbt daemon/stage
-```
+Both the client and daemon are published to Docker under the `landlord` organization. If you need to build them locally then this section is for you.
 
-2. Run it - `/var/run/landlordd` is where the Unix Domain Socket will be created and `/tmp/a` is simply where forked processes will run within:
+Prior to running any of the following, ensure that you have the shared socket directory setup:
 
 ```
-sudo mkdir /var/run/landlord
-sudo chown $USER /var/run/landlord
-sudo chmod 770 /var/run/landlord
-daemon/target/universal/stage/bin/landlordd --process-dir-path=/tmp/a
+docker volume create \
+  --driver local \
+  --opt type=tmpfs \
+  --opt device=tmpfs \
+  --opt o=uid=2 \
+  landlord
 ```
 
-You should see `Ready.` output when the daemon is ready to receive requests.
-
-3. From another terminal, launch a bash script that will connect to it, along with invoking a sample HelloWorld we have.
-
-> This bash script is only an example to demonstrate how `landlordd` works. To actually launch your processes, you'll want to use the `landlord` client described later in this README.
-
-```bash
-cd landlord/landlordd/
-./client.sh
-```
-
-You should then see a connection message output by the daemon. Something like:
+### landlordd
 
 ```
-New connection from: /127.0.0.1:63292
+(cd landlordd && sbt daemon/docker:publishLocal)
 ```
 
-Type some stdin in the bash script window. Having done so, the sample hello world program we have should echo the stdin. Something like this:
+...and then run it assuming the image being published as `daemon:0.1.0-SNAPSHOT` (substitute accordingly):
 
 ```
-$ ./client.sh
-Hi there
-o	Hi there
-x
+docker run \
+  --rm \
+  -v landlord:/var/run/landlord \
+  daemon:0.1.0-SNAPSHOT
 ```
 
-`Hi there` is what I typed in. The `o` and `Hi there` is the stdout and the `x` is the exit code. We're not seeing some values such as the string length and actual exit code because the bash echo command is not outputting them (we'll write a more sophisticated native client down the track).
+To publish to the Docker registry, if you have permission, and the image being published as `daemon:0.1.0-SNAPSHOT` (substitute accordingly):
 
-The bash script expects you to just hit return to end sending stdin.
+```
+docker tag daemon:0.1.0-SNAPSHOT landlord/daemon
+docker push landlord/daemon
+```
 
-## Building landlord
-`landlord` is a CLI program written in [Rust](https://www.rust-lang.org/en-US/). You'll need `cargo` on your path to build it, see [rustup](https://www.rustup.rs/) for more information.
+### landlord
 
-### Dev
-```bash
+First, cross build the client for the Linux target. If you're on Linux then this is relatively straightforward:
+
+```
 cd landlord
-cargo run -- -cp ../landlordd/test/target/scala-2.12/classes example.Hello
+rustup target add x86_64-unknown-linux-musl
+cargo build --target=x86_64-unknown-linux-musl --release
 ```
 
-### Release
-```bash
-cd landlord
-cargo build --release
-./target/release/landlord
+If you have OS X then you're going to need to invoke Docker to perform the build (cross compiling on OS X is problematic). 
+Here's the command for OS X:
+
 ```
+docker run --rm \
+  -v $PWD:/volume \
+  -v ~/.cargo:/root/.cargo \
+  -t clux/muslrust \
+  cargo build --release
+```
+
+We can now build the docker image:
+
+```
+docker build -t landlord/landlord .
+```
+
+Optionally, you can quickly test whether the build worked with the following command. The command will print out landlord's options. You can also see that landlord resides in `/usr/local/bin`.
+
+```
+docker run --rm  landlord/landlord /usr/local/bin/landlord
+```
+
+To publish to the Docker registry, if you have permission:
+
+```
+docker push landlord/landlord
+```
+
+### Base image
+
+Now that we have a small base image, `landlord/landlord` (this takes up about 10MB of disk and about 4MiB of RAM when run), we can build and run our JVM based applications.
+
+To build:
+
+```
+cd ../landlordd
+sbt compile # Just to ensure that the test programs are compiled
+docker build -t landlord/hello .
+```
+
+...then to run:
+
+```
+docker run \
+  --rm \
+  -v landlord:/var/run/landlord \
+  landlord/hello
+```
+
+The Dockerfile for the above is quite minimal and is reproduced below for convenience:
+
+```
+FROM landlord/landlord
+USER daemon
+COPY test/target/scala-2.12/classes /classes
+ENTRYPOINT ["/usr/local/bin/landlord", "-cp", "/classes", "-Dgreeting=Welcome", "example.Hello", "ArgOne", "ArgTwo"]
+```
+
+Lastly, to publish to the Docker registry, if you have permission:
+
+```
+docker push landlord/hello
+```
+
 
 Profiling tooling is gratefully donated by YourKit LLC ![logo](https://www.yourkit.com/images/yklogo.png)
 
