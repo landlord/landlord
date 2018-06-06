@@ -7,12 +7,18 @@ pub enum ExecutionMode {
 }
 
 #[derive(PartialEq, Debug)]
+pub enum Socket {
+    Tcp(String),
+    Unix(String),
+}
+
+#[derive(PartialEq, Debug)]
 pub struct JavaArgs {
     pub cp: Vec<String>,
     pub errors: Vec<String>,
     pub mode: ExecutionMode,
     pub props: Vec<(String, String)>,
-    pub socket: String,
+    pub socket: Socket,
     pub version: bool,
 }
 
@@ -32,7 +38,7 @@ pub fn parse_java_args(args: &Vec<String>) -> JavaArgs {
         errors: vec![],
         mode: ExecutionMode::Help { code: 1 },
         props: vec![],
-        socket: "/var/run/landlord/landlordd.sock".to_string(),
+        socket: Socket::Unix("/var/run/landlord/landlordd.sock".to_string()),
         version: false,
     };
 
@@ -99,7 +105,15 @@ pub fn parse_java_args(args: &Vec<String>) -> JavaArgs {
 
             Some(flag) if flag == "-socket" => {
                 if let Some(socket) = iter.next() {
-                    jargs.socket = socket.to_string();
+                    if socket.starts_with("tcp://") {
+                        jargs.socket = Socket::Tcp(socket[6..].to_string());
+                    } else if socket.starts_with("unix://") {
+                        jargs.socket = Socket::Unix(socket[7..].to_string());
+                    } else {
+                        jargs
+                            .errors
+                            .push(format!("{} must begin with \"tcp://\" or \"unix://\"", flag))
+                    }
                 } else {
                     jargs
                         .errors
@@ -139,7 +153,7 @@ fn test_parse_java_args_help() {
             errors: vec![],
             mode: ExecutionMode::Help { code: 0 },
             props: vec![],
-            socket: "/var/run/landlord/landlordd.sock".to_string(),
+            socket: Socket::Unix("/var/run/landlord/landlordd.sock".to_string()),
             version: false,
         }
     );
@@ -151,7 +165,7 @@ fn test_parse_java_args_help() {
             errors: vec![],
             mode: ExecutionMode::Help { code: 0 },
             props: vec![],
-            socket: "/var/run/landlord/landlordd.sock".to_string(),
+            socket: Socket::Unix("/var/run/landlord/landlordd.sock".to_string()),
             version: false,
         }
     );
@@ -166,7 +180,7 @@ fn test_parse_java_version() {
             errors: vec![],
             mode: ExecutionMode::Exit { code: 0 },
             props: vec![],
-            socket: "/var/run/landlord/landlordd.sock".to_string(),
+            socket: Socket::Unix("/var/run/landlord/landlordd.sock".to_string()),
             version: true,
         }
     );
@@ -188,7 +202,7 @@ fn test_parse_java_showversion() {
                 args: vec![],
             },
             props: vec![],
-            socket: "/var/run/landlord/landlordd.sock".to_string(),
+            socket: Socket::Unix("/var/run/landlord/landlordd.sock".to_string()),
             version: true,
         }
     );
@@ -211,9 +225,18 @@ fn test_parse_java_jar() {
                 args: vec!["arg1".to_string(), "arg2".to_string()],
             },
             props: vec![],
-            socket: "/var/run/landlord/landlordd.sock".to_string(),
+            socket: Socket::Unix("/var/run/landlord/landlordd.sock".to_string()),
             version: false,
         }
+    );
+}
+
+#[test]
+fn test_parse_tcp_socket() {
+    assert_eq!(
+        parse_java_args(&vec!["-socket".to_string(), "tcp://1.2.3.4:5678".to_string(), "HelloWorld".to_string()]).socket,
+
+        Socket::Tcp("1.2.3.4:5678".to_string())
     );
 }
 
@@ -227,7 +250,7 @@ fn test_all() {
             "-d64".to_string(),
             "-server".to_string(),
             "-socket".to_string(),
-            "/dev/null".to_string(),
+            "unix:///dev/null".to_string(),
             "-cp".to_string(),
             "/lib:/usr/lib".to_string(),
             "com.hello.Example".to_string(),
@@ -245,7 +268,7 @@ fn test_all() {
                 ("key1".to_string(), "value1".to_string()),
                 ("key2".to_string(), "value2".to_string()),
             ],
-            socket: "/dev/null".to_string(),
+            socket: Socket::Unix("/dev/null".to_string()),
             version: false,
         }
     );
@@ -266,7 +289,7 @@ fn test_invalid_flags() {
                 args: vec![],
             },
             props: vec![],
-            socket: "/var/run/landlord/landlordd.sock".to_string(),
+            socket: Socket::Unix("/var/run/landlord/landlordd.sock".to_string()),
             version: false,
         }
     );

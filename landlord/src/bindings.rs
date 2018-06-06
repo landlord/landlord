@@ -1,7 +1,8 @@
 use chan_signal::{notify, Signal};
 use libc;
 use proto::*;
-use std::{fs, io, net, path, process, thread};
+use std::{fs, io, marker, net, path, process, thread};
+use std::net::TcpStream;
 use std::io::prelude::*;
 use std::os::unix::net::UnixStream;
 use std::sync::mpsc::*;
@@ -9,14 +10,15 @@ use tar::Builder;
 
 /// Binds everything together and ensures that events received from a given `reader` will
 /// be handled accordingly.
-pub fn handle_events<NewS>(
+pub fn handle_events<NewS, IO>(
     pid: i32,
-    stream: &mut UnixStream,
+    socket: &mut IO,
     reader: Receiver<Input>,
-    mut new_stream: NewS,
+    mut new_socket: NewS,
 ) -> io::Result<i32>
 where
-    NewS: FnMut() -> io::Result<UnixStream>,
+    NewS: FnMut() -> io::Result<IO>,
+    IO: IOSocket + Read + Write
 {
     let mut stdout = io::stdout();
     let mut stderr = io::stderr();
@@ -28,13 +30,13 @@ where
     };
     let handler_writer = |bs: Vec<u8>| {
         if bs.is_empty() {
-            stream.shutdown(net::Shutdown::Write)
+            socket.shutdown(net::Shutdown::Write)
         } else {
-            stream.write_all(&bs)
+            socket.write_all(&bs)
         }
 
     };
-    let session_writer = |bs: Vec<u8>| new_stream().and_then(|ref mut s| s.write_all(&bs));
+    let session_writer = |bs: Vec<u8>| new_socket().and_then(|ref mut s| s.write_all(&bs));
     let std_out = |bs: Vec<u8>| stdout.write_all(&bs);
     let std_err = |bs: Vec<u8>| stderr.write_all(&bs);
 
@@ -173,9 +175,9 @@ pub fn spawn_and_handle_stdin(sender: Sender<Input>) {
 
 /// Spawns a thread and reads data from the provided `stream`. The actual logic
 /// of how much to read is done via the read_handler function.
-pub fn spawn_and_handle_stream_read(mut stream: UnixStream, sender: Sender<Input>) {
+pub fn spawn_and_handle_stream_read<IO>(mut socket: IO, sender: Sender<Input>) where IO: IOSocket + Read + Send + Write + 'static {
     thread::spawn(move || {
-        let s = &mut stream;
+        let s = &mut socket;
         let r = |n: usize| read_bytes(s, n);
         let m = |msg: Input| {
             sender
@@ -195,13 +197,13 @@ pub fn spawn_and_handle_stream_read(mut stream: UnixStream, sender: Sender<Input
 /// Writes the provided `class_path` to the provided `stream` and starts the process. Returns
 /// the process id (from landlordd's perpsective). Upon successful completion, the process
 /// is running and any data subsequently written to `stream` is stdin.
-pub fn install_fs_and_start(
+pub fn install_fs_and_start<IO>(
     class_path: &Vec<String>,
     props: &Vec<(String, String)>,
     class: &String,
     args: &Vec<String>,
-    stream: &mut UnixStream,
-) -> io::Result<i32> {
+    socket: &mut IO,
+) -> io::Result<i32> where IO: IOSocket + Read + Write {
     // given a list of class path entries, these are written to the tar via their position in
     // the vector. Meaning the first entry will be named "0", second "1", and so on. This
     // allows the user to specify any combination of directories and files without us having
@@ -210,10 +212,10 @@ pub fn install_fs_and_start(
     let cp_with_names = class_path_with_names(&class_path);
     let descriptor = app_cmdline(&cp_with_names, &props, &class, &args);
 
-    stream.write_all(descriptor.as_bytes()).and_then(|_| {
-        let tar_padding_stream = BlockSizeWriter::new(stream, 10240);
+    socket.write_all(descriptor.as_bytes()).and_then(|_| {
+        let tar_padding_writer = BlockSizeWriter::new(socket, 10240);
 
-        let mut tar_builder = Builder::new(tar_padding_stream);
+        let mut tar_builder = Builder::new(tar_padding_writer);
 
         cp_with_names
             .iter()
@@ -237,14 +239,14 @@ pub fn install_fs_and_start(
                 tar_builder
                     .finish()
                     .and(tar_builder.into_inner())
-                    .and_then(|ref mut stream| stream.finish())
-                    .and_then(|ref mut stream| match stream {
+                    .and_then(|ref mut socket| socket.finish())
+                    .and_then(|ref mut socket| match socket {
                         &mut None => Err(io::Error::new(
                             io::ErrorKind::InvalidInput,
-                            "Unable to acquire stream (finish() called before?)",
+                            "Unable to acquire socket (was finish() called?)",
                         )),
 
-                        &mut Some(ref mut stream) => read_pid_handler(stream).ok_or(
+                        &mut Some(ref mut socket) => read_pid_handler(socket).ok_or(
                             io::Error::new(io::ErrorKind::InvalidInput, "Unable to parse pid"),
                         ),
                     })
@@ -307,5 +309,32 @@ impl<W: Write> BlockSizeWriter<W> {
         };
 
         operation.map(|_| self.stream.take())
+    }
+}
+
+/// Exposes underlying shutdown and try_clone functions
+/// for the types of sockets we support, i.e. UDS and TCP.
+pub trait IOSocket where Self: marker::Sized {
+    fn shutdown(&self, how: net::Shutdown) -> io::Result<()>;
+    fn try_clone(&self) -> io::Result<Self>;
+}
+
+impl IOSocket for UnixStream {
+    fn shutdown(&self, how: net::Shutdown) -> io::Result<()> {
+        self.shutdown(how)
+    }
+
+    fn try_clone(&self) -> io::Result<Self> {
+        self.try_clone()
+    }
+}
+
+impl IOSocket for TcpStream {
+    fn shutdown(&self, how: net::Shutdown) -> io::Result<()> {
+        self.shutdown(how)
+    }
+
+    fn try_clone(&self) -> io::Result<Self> {
+        self.try_clone()
     }
 }
