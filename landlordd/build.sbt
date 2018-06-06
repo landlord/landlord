@@ -63,9 +63,10 @@ lazy val test = project
     name := "test"
   )
 
-lazy val root = project
+lazy val landlordd = project
   .in(file("."))
   .settings(
+    name := "landlordd",
     inThisBuild(List(
       organization := "com.github.huntc",
       scalaVersion := "2.12.6",
