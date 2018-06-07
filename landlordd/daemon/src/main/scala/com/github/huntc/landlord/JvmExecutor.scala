@@ -98,15 +98,14 @@ object JvmExecutor {
 
   /**
    * Determines all of the active threads that are (recursively) a member of
-   * a thread group. Threads that belong to Landlord itself are filtered out
-   * from the result.
+   * a thread group.
    */
   private[landlord] def activeThreads(group: ThreadGroup): Set[Thread] =
     Thread
       .getAllStackTraces
       .keySet
       .asScala
-      .filter(t => memberOfThreadGroup(t.getThreadGroup, group) && !t.getName.startsWith("landlord-"))
+      .filter(t => memberOfThreadGroup(t.getThreadGroup, group))
       .toSet
 
   /**
@@ -322,6 +321,7 @@ class JvmExecutor(
                           stdin.signalClose()
 
                           activeThreads(group)
+                            .filterNot(_.getName.startsWith(context.system.name))
                             .foreach { thread =>
                               thread.interrupt()
                             }
@@ -347,7 +347,7 @@ class JvmExecutor(
 
                           @annotation.tailrec
                           def waitForTermination(): Unit =
-                            activeThreads(group).headOption match {
+                            activeThreads(group).filterNot(_.getName.startsWith(context.system.name)).headOption match {
                               case Some(h) =>
                                 try {
                                   h.join()
@@ -377,7 +377,7 @@ class JvmExecutor(
                           properties.destroy()
                           securityManager.destroy()
 
-                        }, "landlord-cleanup").start()
+                        }, s"${context.system.name}-cleanup").start()
                       }
                     case None =>
                       self ! SignalProcess(SIGABRT)
@@ -484,7 +484,7 @@ class JvmExecutor(
             } catch {
               case _: NoSuchMethodException =>
             }
-          }: Runnable, "landlord-trap"
+          }: Runnable, s"${context.system.name}-trap"
           ).start()
           if (signal == SIGABRT || signal == SIGINT || signal == SIGTERM)
             timers.startSingleTimer("signalCheck", Stop, exitTimeout)
@@ -496,14 +496,14 @@ class JvmExecutor(
     case SignalProcessEot =>
       try {
         new Thread(
-          processThreadGroup, { () => stdin.signalClose() }, "landlord-eot"
+          processThreadGroup, { () => stdin.signalClose() }, s"${context.system.name}-eot"
         ).start()
       } catch {
         case NonFatal(_) => // All we can do is try
       }
 
     case Stop =>
-      val remainingThreads = activeThreads(processThreadGroup)
+      val remainingThreads = activeThreads(processThreadGroup).filterNot(_.getName.startsWith(context.system.name))
       val remainingThreadCount = remainingThreads.size
       if (remainingThreadCount > 0)
         log.error(
