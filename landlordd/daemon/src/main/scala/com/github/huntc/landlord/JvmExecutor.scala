@@ -1,7 +1,7 @@
 package com.github.huntc.landlord
 
 import akka.NotUsed
-import akka.actor.{ Actor, ActorLogging, PoisonPill, Props, Timers }
+import akka.actor.{ Actor, ActorLogging, Props, Timers }
 import akka.pattern.pipe
 import akka.util.ByteString
 import akka.stream._
@@ -44,7 +44,7 @@ object JvmExecutor {
   case class StartProcess(commandLine: String, stdin: Source[ByteString, AnyRef])
   case class SignalProcess(signal: Int)
   case object SignalProcessEot
-  private case object StopSignalCheck
+  private case object Stop
 
   private[landlord] class BoundedByteArrayOutputStream extends ByteArrayOutputStream {
     val MaxOutputSize = 8192
@@ -98,14 +98,15 @@ object JvmExecutor {
 
   /**
    * Determines all of the active threads that are (recursively) a member of
-   * a thread group.
+   * a thread group. Threads that belong to Landlord itself are filtered out
+   * from the result.
    */
   private[landlord] def activeThreads(group: ThreadGroup): Set[Thread] =
     Thread
       .getAllStackTraces
       .keySet
       .asScala
-      .filter(t => memberOfThreadGroup(t.getThreadGroup, group))
+      .filter(t => memberOfThreadGroup(t.getThreadGroup, group) && !t.getName.startsWith("landlord-"))
       .toSet
 
   /**
@@ -200,7 +201,7 @@ class JvmExecutor(
   import context.dispatcher
 
   def stopSelfWhenDone(mat: NotUsed, done: Future[akka.Done]): NotUsed = {
-    done.map(_ => PoisonPill).pipeTo(self)
+    done.map(_ => Stop).pipeTo(self)
     NotUsed
   }
 
@@ -233,7 +234,9 @@ class JvmExecutor(
         throw e
     }
     .andThen {
-      case _ => self ! SignalProcessEot
+      case _ =>
+        self ! SignalProcessEot
+        self ! SignalProcess(SIGINT)
     }
 
   def receive: Receive =
@@ -268,7 +271,7 @@ class JvmExecutor(
           try {
             val (clsName, args) =
               javaConfig.mode match {
-                case ClassExecutionMode(clsName, args) => clsName -> args
+                case ClassExecutionMode(c, a) => c -> a
               }
 
             val cls = classLoader.loadClass(clsName)
@@ -318,10 +321,7 @@ class JvmExecutor(
 
                           stdin.signalClose()
 
-                          val currentThread = Thread.currentThread
-
                           activeThreads(group)
-                            .filter(_ != currentThread)
                             .foreach { thread =>
                               thread.interrupt()
                             }
@@ -347,7 +347,7 @@ class JvmExecutor(
 
                           @annotation.tailrec
                           def waitForTermination(): Unit =
-                            activeThreads(group).find(_ != currentThread) match {
+                            activeThreads(group).headOption match {
                               case Some(h) =>
                                 try {
                                   h.join()
@@ -356,6 +356,12 @@ class JvmExecutor(
                                 waitForTermination()
                               case _ =>
                             }
+
+                          waitForTermination()
+
+                          log.debug("All threads in group {} have terminated, cleaning up", group.getName)
+
+                          exitStatusPromise.success(status)
 
                           try {
                             Thread.sleep(outputDrainTimeAtExit.toMillis)
@@ -371,12 +377,7 @@ class JvmExecutor(
                           properties.destroy()
                           securityManager.destroy()
 
-                          waitForTermination()
-
-                          log.debug("All threads in group {} have terminated, cleaning up", group.getName)
-
-                          exitStatusPromise.success(status)
-                        }).start()
+                        }, "landlord-cleanup").start()
                       }
                     case None =>
                       self ! SignalProcess(SIGABRT)
@@ -437,7 +438,7 @@ class JvmExecutor(
             processThread.setContextClassLoader(classLoader)
             processThread.start()
 
-            context.become(started(cls, processThreadGroup, exitStatusPromise))
+            context.become(started(cls, processThreadGroup, stopInProgress))
           } catch {
             case e: UnsupportedClassVersionError =>
               classLoader.close()
@@ -471,36 +472,48 @@ class JvmExecutor(
       )
   }
 
-  def started(mainClass: Class[_], processThreadGroup: ThreadGroup, exitStatusPromise: Promise[Int]): Receive = {
+  def started(mainClass: Class[_], processThreadGroup: ThreadGroup, stopInProgress: AtomicBoolean): Receive = {
     case SignalProcess(signal) =>
-      if (!exitStatusPromise.isCompleted && !processThreadGroup.isDestroyed) {
-        new Thread(
-          processThreadGroup, { () =>
-          try {
-            val signalMeth = mainClass.getMethod("trap", Integer.TYPE)
-            signalMeth.invoke(null, signal.asInstanceOf[Object])
-          } catch {
-            case _: NoSuchMethodException =>
-          }
-        }: Runnable
-        ).start()
-        if (signal == SIGABRT || signal == SIGINT || signal == SIGTERM)
-          timers.startSingleTimer("signalCheck", StopSignalCheck, exitTimeout)
+      try {
+        if (!stopInProgress.get && !processThreadGroup.isDestroyed) { // Best effort
+          new Thread(
+            processThreadGroup, { () =>
+            try {
+              val signalMeth = mainClass.getMethod("trap", Integer.TYPE)
+              signalMeth.invoke(null, signal.asInstanceOf[Object])
+            } catch {
+              case _: NoSuchMethodException =>
+            }
+          }: Runnable, "landlord-trap"
+          ).start()
+          if (signal == SIGABRT || signal == SIGINT || signal == SIGTERM)
+            timers.startSingleTimer("signalCheck", Stop, exitTimeout)
+        }
+      } catch {
+        case NonFatal(_) => // There's still a chance that starting the trap thread can fail
       }
 
     case SignalProcessEot =>
-      if (!processThreadGroup.isDestroyed) {
+      try {
         new Thread(
-          processThreadGroup, { () => stdin.signalClose() }
+          processThreadGroup, { () => stdin.signalClose() }, "landlord-eot"
         ).start()
+      } catch {
+        case NonFatal(_) => // All we can do is try
       }
 
-    case StopSignalCheck =>
-      val activeCount = processThreadGroup.activeCount()
-      if (activeCount > 0)
-        log.warning("Process {} after {} as there are {} threads still running - check that your `trap` handler is functioning correctly", processId, exitTimeout, activeCount)
-      if (!exitStatusPromise.isCompleted)
-        log.error("Process {} has not called `System.exit` after {} - all processes must call System.exit even with 0 so that they can be unloaded", processId, exitTimeout)
+    case Stop =>
+      val remainingThreads = activeThreads(processThreadGroup)
+      val remainingThreadCount = remainingThreads.size
+      if (remainingThreadCount > 0)
+        log.error(
+          "RESOURCE RETENTION - Process {} has {} thread(s) still running - check that your shutdown hooks and/or `trap` handler is shutting down all that it needs to.\nRemaining threads: {}",
+          processId, remainingThreadCount, remainingThreads.map(_.getName).mkString(", "))
+      if (!stopInProgress.get())
+        log.error(
+          "RESOURCE RETENTION - Process {} has not called `System.exit` after {}.\nNote when using `trap`, `System.exit` must get called, even with 0, so that the process can be unloaded.",
+          processId, exitTimeout)
+      context.stop(self)
   }
 
   override def postStop(): Unit =

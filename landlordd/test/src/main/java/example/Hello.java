@@ -49,7 +49,6 @@ public class Hello {
 
     @SuppressWarnings("unused")
     public static void trap(int signal) {
-        System.out.println("Trapped: " + signal);
         if ((signal & 0xf) > 0)             // Terminate
           System.exit(128 + signal); // As per the convention of exit codes
     }
