@@ -28,6 +28,7 @@ object JvmExecutor {
     stdin: ThreadGroupInputStream, stdinTimeout: FiniteDuration, stdout: ThreadGroupPrintStream, stderr: ThreadGroupPrintStream,
     in: Source[ByteString, NotUsed], out: Promise[Source[ByteString, NotUsed]],
     exitTimeout: FiniteDuration, outputDrainTimeAtExit: FiniteDuration,
+    heatbeatInterval: FiniteDuration,
     processDirPath: Path
   ): Props =
     Props(
@@ -37,13 +38,15 @@ object JvmExecutor {
         stdin, stdinTimeout, stdout, stderr,
         in, out,
         exitTimeout, outputDrainTimeAtExit,
+        heatbeatInterval,
         processDirPath
       )
     )
 
   case class StartProcess(commandLine: String, stdin: Source[ByteString, AnyRef])
   case class SignalProcess(signal: Int)
-  case object SignalProcessEot
+  private case object ConnectionReadClosed
+  private case object ConnectionWriteClosed
   private case object Stop
 
   private[landlord] class BoundedByteArrayOutputStream extends ByteArrayOutputStream {
@@ -191,6 +194,7 @@ class JvmExecutor(
     stdin: ThreadGroupInputStream, stdinTimeout: FiniteDuration, stdout: ThreadGroupPrintStream, stderr: ThreadGroupPrintStream,
     in: Source[ByteString, NotUsed], out: Promise[Source[ByteString, NotUsed]],
     exitTimeout: FiniteDuration, outputDrainTimeAtExit: FiniteDuration,
+    heatbeatInterval: FiniteDuration,
     processDirPath: Path
 ) extends Actor with ActorLogging with Timers {
 
@@ -198,11 +202,6 @@ class JvmExecutor(
 
   implicit val mat: ActorMaterializer = ActorMaterializer()
   import context.dispatcher
-
-  def stopSelfWhenDone(mat: NotUsed, done: Future[akka.Done]): NotUsed = {
-    done.map(_ => Stop).pipeTo(self)
-    NotUsed
-  }
 
   log.debug("Process actor starting for {}", processId)
   in
@@ -234,8 +233,7 @@ class JvmExecutor(
     }
     .andThen {
       case _ =>
-        self ! SignalProcessEot
-        self ! SignalProcess(SIGINT)
+        self ! ConnectionReadClosed
     }
 
   def receive: Receive =
@@ -339,6 +337,12 @@ class JvmExecutor(
                               log.warning("Unable to access shutdown hooks; they will not be run until the JVM exits")
                           }
 
+                          // A couple notes on threads:
+                          // 1) We rely on a convention that Akka follows for naming its threads, that is
+                          //    they start with "${ActorSystemName}-"
+                          // 2) If this convention changes, we may be waiting on threads that our our own
+                          //    (i.e. belong to landlordd) and the process will never exit.
+
                           // A couple notes on shutdown hooks:
                           // 1) We don't interrupt shutdown hook threads -- this behavior is
                           // consistent with the JVM which doesn't interrupt them either.
@@ -424,6 +428,7 @@ class JvmExecutor(
                   stdoutSource
                     .map(bytes => StdoutPrefix ++ sizeToBytes(bytes.size) ++ bytes)
                     .merge(stderrSource.map(bytes => StderrPrefix ++ sizeToBytes(bytes.size) ++ bytes))
+                    .keepAlive(heatbeatInterval, () => StdoutPrefix ++ sizeToBytes(0))
                     .concat(
                       Source.fromFuture(
                         exitStatusPromise
@@ -432,7 +437,14 @@ class JvmExecutor(
                       )
                     )
                 )
-                .watchTermination()(stopSelfWhenDone)
+                .watchTermination() {
+                  case (m, done) =>
+                    done.onComplete { _ =>
+                      self ! ConnectionWriteClosed
+                    }
+
+                    m
+                }
             )
 
             processThread.setContextClassLoader(classLoader)
@@ -468,14 +480,21 @@ class JvmExecutor(
               } ++
               exitStatusToBytes(exitStatus)
           )
-          .watchTermination()(stopSelfWhenDone)
+          .watchTermination() {
+            case (m, done) =>
+              done.onComplete { _ =>
+                self ! Stop
+              }
+
+              m
+          }
       )
   }
 
   def started(mainClass: Class[_], processThreadGroup: ThreadGroup, stopInProgress: AtomicBoolean): Receive = {
     case SignalProcess(signal) =>
-      try {
-        if (!stopInProgress.get && !processThreadGroup.isDestroyed) { // Best effort
+      if (!stopInProgress.get && !processThreadGroup.isDestroyed) { // Best effort
+        try {
           new Thread(
             processThreadGroup, { () =>
             try {
@@ -488,18 +507,25 @@ class JvmExecutor(
           ).start()
           if (signal == SIGABRT || signal == SIGINT || signal == SIGTERM)
             timers.startSingleTimer("signalCheck", Stop, exitTimeout)
+        } catch {
+          case NonFatal(_) => // There's still a chance that starting the trap thread can fail
         }
-      } catch {
-        case NonFatal(_) => // There's still a chance that starting the trap thread can fail
       }
 
-    case SignalProcessEot =>
+    case ConnectionReadClosed =>
       try {
         new Thread(
           processThreadGroup, { () => stdin.signalClose() }, s"${context.system.name}-eot"
         ).start()
       } catch {
         case NonFatal(_) => // All we can do is try
+      }
+
+    case ConnectionWriteClosed =>
+      if (stopInProgress.get) {
+        self ! Stop
+      } else {
+        self ! SignalProcess(SIGINT)
       }
 
     case Stop =>

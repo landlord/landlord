@@ -116,6 +116,7 @@ class JvmExecutorSpec extends TestKit(ActorSystem("JvmExecutorSpec"))
           stdin, 3.seconds.dilated, stdout, stderr,
           in, out,
           12.seconds.dilated, 100.milliseconds.dilated,
+          1.second,
           processDirPath
         ))
 
