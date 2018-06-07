@@ -23,7 +23,7 @@ where options include:
     -version      print product version and exit
     -showversion  print product version and continue
     -? -help      print this help message
-    -socket       socket to connect to. available schemes: \"unix\", \"tcp\"";
+    -host | -H    host to connect to. available schemes: \"unix\", \"tcp\"";
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -38,8 +38,8 @@ fn main() {
             ExecutionMode::Class {
                 ref class,
                 ref args,
-            } => match parsed.socket {
-                Socket::Unix(path) => handle_execute_class(
+            } => match parsed.host {
+                Host::Unix(path) => handle_execute_class(
                     parsed.cp.as_slice(),
                     class,
                     args,
@@ -47,7 +47,7 @@ fn main() {
                     || UnixStream::connect(&path),
                 ),
 
-                Socket::Tcp(address) => handle_execute_class(
+                Host::Tcp(address) => handle_execute_class(
                     parsed.cp.as_slice(),
                     class,
                     args,
@@ -90,15 +90,15 @@ fn handle_execute_class<IO, NewS, S>(
     class: &S,
     args: &[S],
     props: &[(S, S)],
-    mut new_socket: NewS,
+    mut new_stream: NewS,
 ) where
-    IO: IOSocket + Read + Send + Write + 'static,
+    IO: IOStream + Read + Send + Write + 'static,
     NewS: FnMut() -> io::Result<IO>,
     S: AsRef<str>,
 {
-    match new_socket() {
+    match new_stream() {
         Err(ref mut e) => {
-            eprintln!("landlord: failed to connect to socket: {:?}", e);
+            eprintln!("landlord: failed to connect: {:?}", e);
 
             process::exit(1);
         }
@@ -113,7 +113,7 @@ fn handle_execute_class<IO, NewS, S>(
                     spawn_and_handle_stdin(tx.clone());
                     spawn_and_handle_stream_read(stream, tx.clone());
 
-                    handle_events(pid, &mut stream_writer, rx, new_socket)
+                    handle_events(pid, &mut stream_writer, rx, new_stream)
                 });
 
             let code = match result {

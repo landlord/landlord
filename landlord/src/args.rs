@@ -7,7 +7,7 @@ pub enum ExecutionMode {
 }
 
 #[derive(PartialEq, Debug)]
-pub enum Socket {
+pub enum Host {
     Tcp(String),
     Unix(String),
 }
@@ -18,7 +18,7 @@ pub struct JavaArgs {
     pub errors: Vec<String>,
     pub mode: ExecutionMode,
     pub props: Vec<(String, String)>,
-    pub socket: Socket,
+    pub host: Host,
     pub version: bool,
 }
 
@@ -34,7 +34,7 @@ pub fn parse_java_args<S: AsRef<str>>(args: &[S]) -> JavaArgs {
         errors: vec![],
         mode: ExecutionMode::Help { code: 1 },
         props: vec![],
-        socket: Socket::Unix("/var/run/landlord/landlordd.sock".to_string()),
+        host: Host::Unix("/var/run/landlord/landlordd.sock".to_string()),
         version: false,
     };
 
@@ -99,12 +99,12 @@ pub fn parse_java_args<S: AsRef<str>>(args: &[S]) -> JavaArgs {
                 }
             }
 
-            Some(flag) if flag == "-socket" => {
-                if let Some(socket) = iter.next() {
-                    if socket.starts_with("tcp://") {
-                        jargs.socket = Socket::Tcp(socket[6..].to_string());
-                    } else if socket.starts_with("unix://") {
-                        jargs.socket = Socket::Unix(socket[7..].to_string());
+            Some(flag) if flag == "-H" || flag == "-host" => {
+                if let Some(host) = iter.next() {
+                    if host.starts_with("tcp://") {
+                        jargs.host = Host::Tcp(host[6..].to_string());
+                    } else if host.starts_with("unix://") {
+                        jargs.host = Host::Unix(host[7..].to_string());
                     } else {
                         jargs.errors.push(format!(
                             "{} must begin with \"tcp://\" or \"unix://\"",
@@ -114,7 +114,7 @@ pub fn parse_java_args<S: AsRef<str>>(args: &[S]) -> JavaArgs {
                 } else {
                     jargs
                         .errors
-                        .push(format!("{} requires socket specification", flag))
+                        .push(format!("{} requires host specification", flag))
                 }
             }
 
@@ -150,7 +150,7 @@ fn test_parse_java_args_help() {
             errors: vec![],
             mode: ExecutionMode::Help { code: 0 },
             props: vec![],
-            socket: Socket::Unix("/var/run/landlord/landlordd.sock".to_string()),
+            host: Host::Unix("/var/run/landlord/landlordd.sock".to_string()),
             version: false,
         }
     );
@@ -162,7 +162,7 @@ fn test_parse_java_args_help() {
             errors: vec![],
             mode: ExecutionMode::Help { code: 0 },
             props: vec![],
-            socket: Socket::Unix("/var/run/landlord/landlordd.sock".to_string()),
+            host: Host::Unix("/var/run/landlord/landlordd.sock".to_string()),
             version: false,
         }
     );
@@ -177,7 +177,7 @@ fn test_parse_java_version() {
             errors: vec![],
             mode: ExecutionMode::Exit { code: 0 },
             props: vec![],
-            socket: Socket::Unix("/var/run/landlord/landlordd.sock".to_string()),
+            host: Host::Unix("/var/run/landlord/landlordd.sock".to_string()),
             version: true,
         }
     );
@@ -195,7 +195,7 @@ fn test_parse_java_showversion() {
                 args: vec![],
             },
             props: vec![],
-            socket: Socket::Unix("/var/run/landlord/landlordd.sock".to_string()),
+            host: Host::Unix("/var/run/landlord/landlordd.sock".to_string()),
             version: true,
         }
     );
@@ -213,21 +213,57 @@ fn test_parse_java_jar() {
                 args: vec!["arg1".to_string(), "arg2".to_string()],
             },
             props: vec![],
-            socket: Socket::Unix("/var/run/landlord/landlordd.sock".to_string()),
+            host: Host::Unix("/var/run/landlord/landlordd.sock".to_string()),
             version: false,
         }
     );
 }
 
 #[test]
-fn test_parse_tcp_socket() {
+fn test_parse_host() {
     assert_eq!(
         parse_java_args(&vec![
-            "-socket".to_string(),
+            "-H".to_string(),
             "tcp://1.2.3.4:5678".to_string(),
             "HelloWorld".to_string(),
-        ]).socket,
-        Socket::Tcp("1.2.3.4:5678".to_string())
+        ]).host,
+        Host::Tcp("1.2.3.4:5678".to_string())
+    );
+
+    assert_eq!(
+        parse_java_args(&vec![
+            "-host".to_string(),
+            "tcp://1.2.3.4:5678".to_string(),
+            "HelloWorld".to_string(),
+        ]).host,
+        Host::Tcp("1.2.3.4:5678".to_string())
+    );
+
+    assert_eq!(
+        parse_java_args(&vec![
+            "-host".to_string(),
+            "tcp://".to_string(),
+            "HelloWorld".to_string(),
+        ]).host,
+        Host::Tcp("".to_string())
+    );
+
+    assert_eq!(
+        parse_java_args(&vec![
+            "-host".to_string(),
+            "unix:///my-file".to_string(),
+            "HelloWorld".to_string(),
+        ]).host,
+        Host::Unix("/my-file".to_string())
+    );
+
+    assert_eq!(
+        parse_java_args(&vec![
+            "-host".to_string(),
+            "unix://".to_string(),
+            "HelloWorld".to_string(),
+        ]).host,
+        Host::Unix("".to_string())
     );
 }
 
@@ -240,7 +276,7 @@ fn test_all() {
             "-d32",
             "-d64",
             "-server",
-            "-socket",
+            "-host",
             "unix:///dev/null",
             "-cp",
             "/lib:/usr/lib",
@@ -259,7 +295,7 @@ fn test_all() {
                 ("key1".to_string(), "value1".to_string()),
                 ("key2".to_string(), "value2".to_string()),
             ],
-            socket: Socket::Unix("/dev/null".to_string()),
+            host: Host::Unix("/dev/null".to_string()),
             version: false,
         }
     );
@@ -277,7 +313,7 @@ fn test_invalid_flags() {
                 args: vec![],
             },
             props: vec![],
-            socket: Socket::Unix("/var/run/landlord/landlordd.sock".to_string()),
+            host: Host::Unix("/var/run/landlord/landlordd.sock".to_string()),
             version: false,
         }
     );

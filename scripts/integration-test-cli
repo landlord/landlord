@@ -39,9 +39,9 @@ SOCAT_PID="$!"
 while ! nc -z 127.0.0.1 2375; do sleep 1; done
 
 # Run a program that uses stdin and properties
-OUTPUT=$(echo Testing | ./landlord/target/release/landlord -Dgreeting='hello world' -socket "unix://$DIR/landlordd.sock" -cp landlordd/test/target/scala-2.12/classes example.Hello)
+OUTPUT=$(echo Testing | ./landlord/target/release/landlord -Dgreeting='hello world' -H "unix://$DIR/landlordd.sock" -cp landlordd/test/target/scala-2.12/classes example.Hello)
 # Run the same program again, but this time over TCP
-OUTPUT2=$(echo Testing | ./landlord/target/release/landlord -Dgreeting='hello world' -socket "tcp://127.0.0.1:2375" -cp landlordd/test/target/scala-2.12/classes example.Hello)
+OUTPUT2=$(echo Testing | ./landlord/target/release/landlord -Dgreeting='hello world' -H "tcp://127.0.0.1:2375" -cp landlordd/test/target/scala-2.12/classes example.Hello)
 EXPECTED='hello world
 Testing
 Good Bye!'

@@ -12,13 +12,13 @@ use tar::Builder;
 /// be handled accordingly.
 pub fn handle_events<NewS, IO>(
     pid: i32,
-    socket: &mut IO,
+    stream: &mut IO,
     reader: Receiver<Input>,
-    mut new_socket: NewS,
+    mut new_stream: NewS,
 ) -> io::Result<i32>
 where
     NewS: FnMut() -> io::Result<IO>,
-    IO: IOSocket + Read + Write,
+    IO: IOStream + Read + Write,
 {
     let mut stdout = io::stdout();
     let mut stderr = io::stderr();
@@ -30,12 +30,12 @@ where
     };
     let handler_writer = |bs: Vec<u8>| {
         if bs.is_empty() {
-            socket.shutdown(net::Shutdown::Write)
+            stream.shutdown(net::Shutdown::Write)
         } else {
-            socket.write_all(&bs)
+            stream.write_all(&bs)
         }
     };
-    let session_writer = |bs: Vec<u8>| new_socket().and_then(|ref mut s| s.write_all(&bs));
+    let session_writer = |bs: Vec<u8>| new_stream().and_then(|ref mut s| s.write_all(&bs));
     let std_out = |bs: Vec<u8>| stdout.write_all(&bs);
     let std_err = |bs: Vec<u8>| stderr.write_all(&bs);
 
@@ -127,7 +127,7 @@ pub fn spawn_and_handle_signals(sender: Sender<Input>) {
         if let Some(s) = signal.recv() {
             if let Err(e) = sender.send(Input::Signal(as_sig(&s))) {
                 eprintln!("landlord: signal handler crashed, {:?}", e);
-                return;
+                process::exit(1);
             }
         }
     });
@@ -165,7 +165,7 @@ pub fn spawn_and_handle_stdin(sender: Sender<Input>) {
                 Err(ref err) if err.kind() == io::ErrorKind::Interrupted => (),
                 Err(e) => {
                     eprintln!("landlord: stdin crashed, {:?}", e);
-                    return;
+                    process::exit(1);
                 }
             }
         }
@@ -174,12 +174,12 @@ pub fn spawn_and_handle_stdin(sender: Sender<Input>) {
 
 /// Spawns a thread and reads data from the provided `stream`. The actual logic
 /// of how much to read is done via the read_handler function.
-pub fn spawn_and_handle_stream_read<IO>(mut socket: IO, sender: Sender<Input>)
+pub fn spawn_and_handle_stream_read<IO>(mut stream: IO, sender: Sender<Input>)
 where
-    IO: IOSocket + Read + Send + Write + 'static,
+    IO: IOStream + Read + Send + Write + 'static,
 {
     thread::spawn(move || {
-        let s = &mut socket;
+        let s = &mut stream;
         let r = |n: usize| read_bytes(s, n);
         let m = |msg: Input| {
             sender
@@ -188,10 +188,8 @@ where
         };
 
         if let Err(read_error) = read_handler(r, m) {
-            if let Err(_send_error) = sender.send(Input::Fail(read_error)) {
-                eprintln!("landlord: catastrophic failure (channel and read crashed)");
-                process::exit(1);
-            }
+            eprintln!("landlord: read_hadler crashed, {:?}", read_error);
+            process::exit(1);
         }
     });
 }
@@ -204,10 +202,10 @@ pub fn install_fs_and_start<IO, S>(
     props: &[(S, S)],
     class: &S,
     args: &[S],
-    socket: &mut IO,
+    stream: &mut IO,
 ) -> io::Result<i32>
 where
-    IO: IOSocket + Read + Write,
+    IO: IOStream + Read + Write,
     S: AsRef<str>,
 {
     // given a list of class path entries, these are written to the tar via their position in
@@ -218,8 +216,8 @@ where
     let cp_with_names = class_path_with_names(class_path);
     let descriptor = app_cmdline(cp_with_names.as_slice(), props, class, args);
 
-    socket.write_all(descriptor.as_bytes()).and_then(|_| {
-        let tar_padding_writer = BlockSizeWriter::new(socket, 10240);
+    stream.write_all(descriptor.as_bytes()).and_then(|_| {
+        let tar_padding_writer = BlockSizeWriter::new(stream, 10240);
 
         let mut tar_builder = Builder::new(tar_padding_writer);
 
@@ -245,14 +243,14 @@ where
                 tar_builder
                     .finish()
                     .and(tar_builder.into_inner())
-                    .and_then(|ref mut socket| socket.finish())
-                    .and_then(|ref mut socket| match socket {
+                    .and_then(|ref mut stream| stream.finish())
+                    .and_then(|ref mut stream| match stream {
                         &mut None => Err(io::Error::new(
                             io::ErrorKind::InvalidInput,
-                            "Unable to acquire socket (was finish() called?)",
+                            "Unable to acquire stream (was finish() called?)",
                         )),
 
-                        &mut Some(ref mut socket) => read_pid_handler(socket).ok_or(
+                        &mut Some(ref mut stream) => read_pid_handler(stream).ok_or(
                             io::Error::new(io::ErrorKind::InvalidInput, "Unable to parse pid"),
                         ),
                     })
@@ -319,8 +317,8 @@ impl<W: Write> BlockSizeWriter<W> {
 }
 
 /// Exposes underlying shutdown and try_clone functions
-/// for the types of sockets we support, i.e. UDS and TCP.
-pub trait IOSocket
+/// for the types of host protocols we support, i.e. UDS and TCP.
+pub trait IOStream
 where
     Self: marker::Sized,
 {
@@ -328,7 +326,7 @@ where
     fn try_clone(&self) -> io::Result<Self>;
 }
 
-impl IOSocket for UnixStream {
+impl IOStream for UnixStream {
     fn shutdown(&self, how: net::Shutdown) -> io::Result<()> {
         self.shutdown(how)
     }
@@ -338,7 +336,7 @@ impl IOSocket for UnixStream {
     }
 }
 
-impl IOSocket for TcpStream {
+impl IOStream for TcpStream {
     fn shutdown(&self, how: net::Shutdown) -> io::Result<()> {
         self.shutdown(how)
     }
