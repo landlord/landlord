@@ -1,22 +1,24 @@
 use chan_signal::{notify, Signal};
 use libc;
 use proto::*;
-use std::{fs, io, net, path, process, thread};
 use std::io::prelude::*;
+use std::net::TcpStream;
 use std::os::unix::net::UnixStream;
 use std::sync::mpsc::*;
+use std::{fs, io, marker, net, path, process, thread};
 use tar::Builder;
 
 /// Binds everything together and ensures that events received from a given `reader` will
 /// be handled accordingly.
-pub fn handle_events<NewS>(
+pub fn handle_events<NewS, IO>(
     pid: i32,
-    stream: &mut UnixStream,
+    stream: &mut IO,
     reader: Receiver<Input>,
     mut new_stream: NewS,
 ) -> io::Result<i32>
 where
-    NewS: FnMut() -> io::Result<UnixStream>,
+    NewS: FnMut() -> io::Result<IO>,
+    IO: IOStream + Read + Write,
 {
     let mut stdout = io::stdout();
     let mut stderr = io::stderr();
@@ -32,7 +34,6 @@ where
         } else {
             stream.write_all(&bs)
         }
-
     };
     let session_writer = |bs: Vec<u8>| new_stream().and_then(|ref mut s| s.write_all(&bs));
     let std_out = |bs: Vec<u8>| stdout.write_all(&bs);
@@ -126,7 +127,7 @@ pub fn spawn_and_handle_signals(sender: Sender<Input>) {
         if let Some(s) = signal.recv() {
             if let Err(e) = sender.send(Input::Signal(as_sig(&s))) {
                 eprintln!("landlord: signal handler crashed, {:?}", e);
-                return;
+                process::exit(1);
             }
         }
     });
@@ -164,7 +165,7 @@ pub fn spawn_and_handle_stdin(sender: Sender<Input>) {
                 Err(ref err) if err.kind() == io::ErrorKind::Interrupted => (),
                 Err(e) => {
                     eprintln!("landlord: stdin crashed, {:?}", e);
-                    return;
+                    process::exit(1);
                 }
             }
         }
@@ -173,7 +174,10 @@ pub fn spawn_and_handle_stdin(sender: Sender<Input>) {
 
 /// Spawns a thread and reads data from the provided `stream`. The actual logic
 /// of how much to read is done via the read_handler function.
-pub fn spawn_and_handle_stream_read(mut stream: UnixStream, sender: Sender<Input>) {
+pub fn spawn_and_handle_stream_read<IO>(mut stream: IO, sender: Sender<Input>)
+where
+    IO: IOStream + Read + Send + Write + 'static,
+{
     thread::spawn(move || {
         let s = &mut stream;
         let r = |n: usize| read_bytes(s, n);
@@ -184,10 +188,8 @@ pub fn spawn_and_handle_stream_read(mut stream: UnixStream, sender: Sender<Input
         };
 
         if let Err(read_error) = read_handler(r, m) {
-            if let Err(_send_error) = sender.send(Input::Fail(read_error)) {
-                eprintln!("landlord: catastrophic failure (channel and read crashed)");
-                process::exit(1);
-            }
+            eprintln!("landlord: read_hadler crashed, {:?}", read_error);
+            process::exit(1);
         }
     });
 }
@@ -195,25 +197,29 @@ pub fn spawn_and_handle_stream_read(mut stream: UnixStream, sender: Sender<Input
 /// Writes the provided `class_path` to the provided `stream` and starts the process. Returns
 /// the process id (from landlordd's perpsective). Upon successful completion, the process
 /// is running and any data subsequently written to `stream` is stdin.
-pub fn install_fs_and_start(
-    class_path: &Vec<String>,
-    props: &Vec<(String, String)>,
-    class: &String,
-    args: &Vec<String>,
-    stream: &mut UnixStream,
-) -> io::Result<i32> {
+pub fn install_fs_and_start<IO, S>(
+    class_path: &[S],
+    props: &[(S, S)],
+    class: &S,
+    args: &[S],
+    stream: &mut IO,
+) -> io::Result<i32>
+where
+    IO: IOStream + Read + Write,
+    S: AsRef<str>,
+{
     // given a list of class path entries, these are written to the tar via their position in
     // the vector. Meaning the first entry will be named "0", second "1", and so on. This
     // allows the user to specify any combination of directories and files without us having
     // to find some common parent path string.
 
-    let cp_with_names = class_path_with_names(&class_path);
-    let descriptor = app_cmdline(&cp_with_names, &props, &class, &args);
+    let cp_with_names = class_path_with_names(class_path);
+    let descriptor = app_cmdline(cp_with_names.as_slice(), props, class, args);
 
     stream.write_all(descriptor.as_bytes()).and_then(|_| {
-        let tar_padding_stream = BlockSizeWriter::new(stream, 10240);
+        let tar_padding_writer = BlockSizeWriter::new(stream, 10240);
 
-        let mut tar_builder = Builder::new(tar_padding_stream);
+        let mut tar_builder = Builder::new(tar_padding_writer);
 
         cp_with_names
             .iter()
@@ -241,7 +247,7 @@ pub fn install_fs_and_start(
                     .and_then(|ref mut stream| match stream {
                         &mut None => Err(io::Error::new(
                             io::ErrorKind::InvalidInput,
-                            "Unable to acquire stream (finish() called before?)",
+                            "Unable to acquire stream (was finish() called?)",
                         )),
 
                         &mut Some(ref mut stream) => read_pid_handler(stream).ok_or(
@@ -307,5 +313,35 @@ impl<W: Write> BlockSizeWriter<W> {
         };
 
         operation.map(|_| self.stream.take())
+    }
+}
+
+/// Exposes underlying shutdown and try_clone functions
+/// for the types of host protocols we support, i.e. UDS and TCP.
+pub trait IOStream
+where
+    Self: marker::Sized,
+{
+    fn shutdown(&self, how: net::Shutdown) -> io::Result<()>;
+    fn try_clone(&self) -> io::Result<Self>;
+}
+
+impl IOStream for UnixStream {
+    fn shutdown(&self, how: net::Shutdown) -> io::Result<()> {
+        self.shutdown(how)
+    }
+
+    fn try_clone(&self) -> io::Result<Self> {
+        self.try_clone()
+    }
+}
+
+impl IOStream for TcpStream {
+    fn shutdown(&self, how: net::Shutdown) -> io::Result<()> {
+        self.shutdown(how)
+    }
+
+    fn try_clone(&self) -> io::Result<Self> {
+        self.try_clone()
     }
 }

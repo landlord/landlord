@@ -2,7 +2,8 @@
 
 set -e
 
-# Builds the CLI and daemon and runs a small integration test
+# Builds the CLI and daemon and runs a small integration test, testing connectivity
+# over TCP and Unix Domain Sockets.
 
 DIR=/tmp/landlord-test
 
@@ -30,20 +31,29 @@ rm -rf "$DIR"
 mkdir -p "$DIR"
 landlordd/daemon/target/universal/stage/bin/landlordd --host "unix://$DIR/landlordd.sock" &
 LANDLORDD_PID="$!"
+while ! [ -e "$DIR/landlordd.sock" ]; do sleep 1; done
 
-while ! [ -e "$DIR/landlordd.sock" ]; do
-    sleep 1
-done
+# Setup socat for forwarding connections on TCP port 2375 to the unix domain socket (temporary until landlordd has TCP support)
+socat -d -d TCP4-LISTEN:2375,fork "UNIX-CONNECT:$DIR/landlordd.sock" &
+SOCAT_PID="$!"
+while ! nc -z 127.0.0.1 2375; do sleep 1; done
 
 # Run a program that uses stdin and properties
-OUTPUT=$(echo Testing | ./landlord/target/release/landlord -Dgreeting='hello world' -socket "$DIR/landlordd.sock" -cp landlordd/test/target/scala-2.12/classes example.Hello)
+OUTPUT=$(echo Testing | ./landlord/target/release/landlord -Dgreeting='hello world' -H "unix://$DIR/landlordd.sock" -cp landlordd/test/target/scala-2.12/classes example.Hello)
+# Run the same program again, but this time over TCP
+OUTPUT2=$(echo Testing | ./landlord/target/release/landlord -Dgreeting='hello world' -H "tcp://127.0.0.1:2375" -cp landlordd/test/target/scala-2.12/classes example.Hello)
 EXPECTED='hello world
 Testing
 Good Bye!'
 
-# Shutdown landlordd
+# Shutdown landlordd and socat
 kill "$LANDLORDD_PID"
+kill "$SOCAT_PID"
 wait
 
 # Test that we got what we expected
-[ "$OUTPUT" = "$EXPECTED" ]
+EXPECTED='hello world
+Testing
+Good Bye!'
+
+[ "$OUTPUT" = "$EXPECTED" ] && [ "$OUTPUT2" = "$EXPECTED" ]
