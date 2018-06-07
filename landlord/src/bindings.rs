@@ -5,7 +5,11 @@ use std::{fs, io, net, path, process, thread};
 use std::io::prelude::*;
 use std::os::unix::net::UnixStream;
 use std::sync::mpsc::*;
+use std::time::Duration;
 use tar::Builder;
+
+const HEARTBEAT_INTERVAL_MS: u64 = 1000;
+const HEARTBEAT_SIGNAL: i32 = -2147483648;
 
 /// Binds everything together and ensures that events received from a given `reader` will
 /// be handled accordingly.
@@ -126,7 +130,7 @@ pub fn spawn_and_handle_signals(sender: Sender<Input>) {
         if let Some(s) = signal.recv() {
             if let Err(e) = sender.send(Input::Signal(as_sig(&s))) {
                 eprintln!("landlord: signal handler crashed, {:?}", e);
-                return;
+                process::exit(1);
             }
         }
     });
@@ -158,13 +162,25 @@ pub fn spawn_and_handle_stdin(sender: Sender<Input>) {
 
             match result {
                 Ok(closed) if closed => {
-                    return;
+                    // We've closed our side of the socket (signifying EOT), so now
+                    // we start sending landlordd heartbeats so it knows we're alive.
+
+                    loop {
+                        match sender.send(Input::Signal(HEARTBEAT_SIGNAL)) {
+                            Ok(()) => (),
+                            Err(e) => {
+                                eprintln!("landlord: sender crashed, {:?}", e);
+                                process::exit(1);
+                            }
+                        }
+                        thread::sleep(Duration::from_millis(HEARTBEAT_INTERVAL_MS));
+                    }
                 }
                 Ok(_) => (),
                 Err(ref err) if err.kind() == io::ErrorKind::Interrupted => (),
                 Err(e) => {
                     eprintln!("landlord: stdin crashed, {:?}", e);
-                    return;
+                    process::exit(1);
                 }
             }
         }
@@ -184,10 +200,8 @@ pub fn spawn_and_handle_stream_read(mut stream: UnixStream, sender: Sender<Input
         };
 
         if let Err(read_error) = read_handler(r, m) {
-            if let Err(_send_error) = sender.send(Input::Fail(read_error)) {
-                eprintln!("landlord: catastrophic failure (channel and read crashed)");
-                process::exit(1);
-            }
+            eprintln!("landlord: read_handler crashed, {:?}", read_error);
+            process::exit(1);
         }
     });
 }
