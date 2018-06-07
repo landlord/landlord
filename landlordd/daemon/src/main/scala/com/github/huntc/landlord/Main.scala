@@ -27,7 +27,8 @@ object Main extends App {
       outputDrainTimeAtExit: FiniteDuration = 100.milliseconds,
       processDirPath: Path = Files.createTempDirectory("jvm-executor"),
       stdinTimeout: FiniteDuration = 1.hour,
-      useDefaultSecurityManager: Boolean = false
+      useDefaultSecurityManager: Boolean = false,
+      heartbeatInterval: FiniteDuration = 1.second
   )
 
   val parser = new scopt.OptionParser[Config](Version.executableScriptName) {
@@ -228,6 +229,7 @@ object Main extends App {
           stdin, config.stdinTimeout, stdout, stderr,
           in, out,
           config.exitTimeout, config.outputDrainTimeAtExit,
+          config.heartbeatInterval,
           config.processDirPath.resolve(processId.toString)
         )
       }
@@ -244,7 +246,6 @@ object Main extends App {
                 system.log.debug("New unix connection {}", connection)
 
                 connection.handleWith(controlFlow(reaper, launchInfoOp, sendKillOp))
-
               })(Keep.left)
               .run
 
