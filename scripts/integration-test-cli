@@ -28,7 +28,7 @@ wait
 # Start landlordd
 rm -rf "$DIR"
 mkdir -p "$DIR"
-landlordd/daemon/target/universal/stage/bin/landlordd --bind-dir-path "$DIR" &
+landlordd/daemon/target/universal/stage/bin/landlordd --host "unix://$DIR/landlordd.sock" &
 LANDLORDD_PID="$!"
 
 while ! [ -e "$DIR/landlordd.sock" ]; do
