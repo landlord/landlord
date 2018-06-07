@@ -4,7 +4,6 @@ use std::io::prelude::*;
 
 pub enum Input {
     Exit(i32),
-    Fail(io::Error),
     Signal(i32),
     StdIn(Vec<u8>),
     StdInClosed,
@@ -41,10 +40,6 @@ where
         match reader() {
             Ok(Input::Exit(s)) => {
                 return Ok(s);
-            }
-
-            Ok(Input::Fail(e)) => {
-                return Err(e);
             }
 
             Ok(Input::StdIn(b)) => {

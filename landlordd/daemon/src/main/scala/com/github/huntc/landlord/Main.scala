@@ -27,7 +27,8 @@ object Main extends App {
       outputDrainTimeAtExit: FiniteDuration = 100.milliseconds,
       processDirPath: Path = Files.createTempDirectory("jvm-executor"),
       stdinTimeout: FiniteDuration = 1.hour,
-      useDefaultSecurityManager: Boolean = false
+      useDefaultSecurityManager: Boolean = false,
+      processDeadAfter: FiniteDuration = 10.seconds, processDeadPollInterval: FiniteDuration = 1.second
   )
 
   val parser = new scopt.OptionParser[Config](Version.executableScriptName) {
@@ -228,6 +229,7 @@ object Main extends App {
           stdin, config.stdinTimeout, stdout, stderr,
           in, out,
           config.exitTimeout, config.outputDrainTimeAtExit,
+          config.processDeadAfter, config.processDeadPollInterval,
           config.processDirPath.resolve(processId.toString)
         )
       }

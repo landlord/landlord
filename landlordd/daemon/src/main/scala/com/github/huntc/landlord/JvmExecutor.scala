@@ -28,6 +28,7 @@ object JvmExecutor {
     stdin: ThreadGroupInputStream, stdinTimeout: FiniteDuration, stdout: ThreadGroupPrintStream, stderr: ThreadGroupPrintStream,
     in: Source[ByteString, NotUsed], out: Promise[Source[ByteString, NotUsed]],
     exitTimeout: FiniteDuration, outputDrainTimeAtExit: FiniteDuration,
+    processDeadAfter: FiniteDuration, processDeadPollInterval: FiniteDuration,
     processDirPath: Path
   ): Props =
     Props(
@@ -37,6 +38,7 @@ object JvmExecutor {
         stdin, stdinTimeout, stdout, stderr,
         in, out,
         exitTimeout, outputDrainTimeAtExit,
+        processDeadAfter, processDeadPollInterval,
         processDirPath
       )
     )
@@ -45,6 +47,7 @@ object JvmExecutor {
   case class SignalProcess(signal: Int)
   case object SignalProcessEot
   private case object Stop
+  private case object StopIfDead
 
   private[landlord] class BoundedByteArrayOutputStream extends ByteArrayOutputStream {
     val MaxOutputSize = 8192
@@ -77,6 +80,7 @@ object JvmExecutor {
   private[landlord] case class ExitEarly(exitStatus: Int, errorMessage: Option[String])
 
   private[landlord] val SIGABRT = 6
+  private[landlord] val SIGHEARTBEAT = -2147483648
   private[landlord] val SIGINT = 2
   private[landlord] val SIGTERM = 15
 
@@ -191,6 +195,7 @@ class JvmExecutor(
     stdin: ThreadGroupInputStream, stdinTimeout: FiniteDuration, stdout: ThreadGroupPrintStream, stderr: ThreadGroupPrintStream,
     in: Source[ByteString, NotUsed], out: Promise[Source[ByteString, NotUsed]],
     exitTimeout: FiniteDuration, outputDrainTimeAtExit: FiniteDuration,
+    processDeadAfter: FiniteDuration, processDeadPollInterval: FiniteDuration,
     processDirPath: Path
 ) extends Actor with ActorLogging with Timers {
 
@@ -235,7 +240,6 @@ class JvmExecutor(
     .andThen {
       case _ =>
         self ! SignalProcessEot
-        self ! SignalProcess(SIGINT)
     }
 
   def receive: Receive =
@@ -438,7 +442,7 @@ class JvmExecutor(
             processThread.setContextClassLoader(classLoader)
             processThread.start()
 
-            context.become(started(cls, processThreadGroup, stopInProgress))
+            context.become(started(cls, processThreadGroup, stopInProgress, System.nanoTime()))
           } catch {
             case e: UnsupportedClassVersionError =>
               classLoader.close()
@@ -472,34 +476,52 @@ class JvmExecutor(
       )
   }
 
-  def started(mainClass: Class[_], processThreadGroup: ThreadGroup, stopInProgress: AtomicBoolean): Receive = {
+  def started(mainClass: Class[_], processThreadGroup: ThreadGroup, stopInProgress: AtomicBoolean, lastHeartbeat: Long): Receive = {
     case SignalProcess(signal) =>
-      try {
-        if (!stopInProgress.get && !processThreadGroup.isDestroyed) { // Best effort
-          new Thread(
-            processThreadGroup, { () =>
-            try {
-              val signalMeth = mainClass.getMethod("trap", Integer.TYPE)
-              signalMeth.invoke(null, signal.asInstanceOf[Object])
-            } catch {
-              case _: NoSuchMethodException =>
+      signal match {
+        case SIGHEARTBEAT =>
+          context.become(started(mainClass, processThreadGroup, stopInProgress, System.nanoTime()))
+
+        case _ =>
+          try {
+            if (!stopInProgress.get && !processThreadGroup.isDestroyed) { // Best effort
+              new Thread(
+                processThreadGroup, { () =>
+                try {
+                  val signalMeth = mainClass.getMethod("trap", Integer.TYPE)
+                  signalMeth.invoke(null, signal.asInstanceOf[Object])
+                } catch {
+                  case _: NoSuchMethodException =>
+                }
+              }: Runnable, s"${context.system.name}-trap"
+              ).start()
+              if (signal == SIGABRT || signal == SIGINT || signal == SIGTERM)
+                timers.startSingleTimer("signalCheck", Stop, exitTimeout)
             }
-          }: Runnable, s"${context.system.name}-trap"
-          ).start()
-          if (signal == SIGABRT || signal == SIGINT || signal == SIGTERM)
-            timers.startSingleTimer("signalCheck", Stop, exitTimeout)
-        }
-      } catch {
-        case NonFatal(_) => // There's still a chance that starting the trap thread can fail
+          } catch {
+            case NonFatal(_) => // There's still a chance that starting the trap thread can fail
+          }
       }
 
     case SignalProcessEot =>
+      // We've reached EOT, but that doesn't mean the process is dead. The client
+      // periodically sends heartbeats to landlordd in the form of a reserved signal.
+      // If we haven't received that signal after some period of time, then we'll
+      // send ourselves a SIGINT.
+      timers.startPeriodicTimer("processDeadPoll", StopIfDead, processDeadPollInterval)
+
       try {
         new Thread(
           processThreadGroup, { () => stdin.signalClose() }, s"${context.system.name}-eot"
         ).start()
       } catch {
         case NonFatal(_) => // All we can do is try
+      }
+
+    case StopIfDead =>
+      if (lastHeartbeat < System.nanoTime() - processDeadAfter.toNanos) {
+        log.info("Haven't received heartbeat, process shutting down")
+        self ! SignalProcess(SIGINT)
       }
 
     case Stop =>
