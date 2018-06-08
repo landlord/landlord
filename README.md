@@ -232,26 +232,25 @@ docker push landlord/daemon
 First, cross build the client for the Linux target. If you're on Linux then this is relatively straightforward:
 
 ```
-cd landlord
-rustup target add x86_64-unknown-linux-musl
-cargo build --target=x86_64-unknown-linux-musl --release
+(cd landlord && rustup target add x86_64-unknown-linux-musl && cargo build --target=x86_64-unknown-linux-musl --release)
 ```
 
 If you have OS X then you're going to need to invoke Docker to perform the build (cross compiling on OS X is problematic). 
 Here's the command for OS X:
 
 ```
-docker run --rm \
-  -v $PWD:/volume \
-  -v ~/.cargo:/root/.cargo \
-  -t clux/muslrust \
-  cargo build --release
+(cd landlord && \
+ docker run --rm \
+   -v $PWD:/volume \
+   -v ~/.cargo:/root/.cargo \
+   -t clux/muslrust \
+   cargo build --release)
 ```
 
 We can now build the docker image:
 
 ```
-docker build -t landlord/landlord .
+(cd landlord && docker build --no-cache -t landlord/landlord .)
 ```
 
 Optionally, you can quickly test whether the build worked with the following command. The command will print out landlord's options. You can also see that landlord resides in `/usr/local/bin`.
@@ -273,12 +272,10 @@ Now that we have a small base image, `landlord/landlord` (this takes up about 10
 To build:
 
 ```
-cd ../landlordd
-sbt compile # Just to ensure that the test programs are compiled
-docker build -t landlord/hello .
+(cd landlordd && sbt compile && docker build --no-cache -t landlord/hello .)
 ```
 
-...then to run:
+...then (having also started landlord/daemon) to run:
 
 ```
 docker run \
