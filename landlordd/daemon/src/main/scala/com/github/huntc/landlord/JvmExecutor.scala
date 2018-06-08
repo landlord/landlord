@@ -232,8 +232,7 @@ class JvmExecutor(
         throw e
     }
     .andThen {
-      case _ =>
-        self ! ConnectionReadClosed
+      case _ => self ! ConnectionReadClosed
     }
 
   def receive: Receive =
@@ -351,7 +350,7 @@ class JvmExecutor(
 
                           @annotation.tailrec
                           def waitForTermination(): Unit =
-                            activeThreads(group).filterNot(_.getName.startsWith(context.system.name)).headOption match {
+                            activeThreads(group).find(!_.getName.startsWith(context.system.name)) match {
                               case Some(h) =>
                                 try {
                                   h.join()
