@@ -53,7 +53,12 @@ lazy val daemon = project
     dockerCommands += Cmd("USER", "root"),
     dockerCommands += Cmd("RUN", "mkdir", "-p", "/var/run/landlord"),
     dockerCommands += Cmd("RUN", "chown", daemonUser.value, "/var/run/landlord"),
-    dockerCommands += Cmd("USER", daemonUser.value)
+    dockerCommands += Cmd("USER", daemonUser.value),
+    bashScriptExtraDefines ++= Seq(
+      // Configuration for when running in a container
+      """addJava "-XX:+UnlockExperimentalVMOptions"""",
+      """addJava "-XX:+UseCGroupMemoryLimitForHeap""""
+    )
   )
   .enablePlugins(AshScriptPlugin, JavaAppPackaging)
 
