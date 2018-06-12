@@ -24,11 +24,12 @@ object Main extends App {
   case class Config(
       hosts: Seq[URI] = List.empty,
       exitTimeout: FiniteDuration = 12.seconds,
+      exposedProps: Seq[String] = List.empty,
+      heartbeatInterval: FiniteDuration = 1.second,
       outputDrainTimeAtExit: FiniteDuration = 100.milliseconds,
       processDirPath: Path = Files.createTempDirectory("jvm-executor"),
       stdinTimeout: FiniteDuration = 1.hour,
-      useDefaultSecurityManager: Boolean = false,
-      heartbeatInterval: FiniteDuration = 1.second
+      useDefaultSecurityManager: Boolean = false
   )
 
   val parser = new scopt.OptionParser[Config](Version.executableScriptName) {
@@ -65,6 +66,10 @@ object Main extends App {
             .getOrElse(throw new IllegalArgumentException("Bad time - expecting a finite duration such as 10s: " + x))
       )
     }.text("The time to wait for a process to exit before interrupting. Defaults to 12 seconds (12s).")
+
+    opt[String]("exposed-prop").unbounded().action { (x, c) =>
+      c.copy(exposedProps = x +: c.exposedProps)
+    }.text("Zero or more system properties that should be exposed to processes. Defaults to none.")
 
     opt[String]("output-drain-time-at-exit").action { (x, c) =>
       c.copy(
@@ -230,7 +235,8 @@ object Main extends App {
           in, out,
           config.exitTimeout, config.outputDrainTimeAtExit,
           config.heartbeatInterval,
-          config.processDirPath.resolve(processId.toString)
+          config.processDirPath.resolve(processId.toString),
+          config.exposedProps
         )
       }
 

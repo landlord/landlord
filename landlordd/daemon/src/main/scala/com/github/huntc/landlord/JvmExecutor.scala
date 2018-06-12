@@ -29,7 +29,8 @@ object JvmExecutor {
     in: Source[ByteString, NotUsed], out: Promise[Source[ByteString, NotUsed]],
     exitTimeout: FiniteDuration, outputDrainTimeAtExit: FiniteDuration,
     heatbeatInterval: FiniteDuration,
-    processDirPath: Path
+    processDirPath: Path,
+    exposedPropNames: Seq[String]
   ): Props =
     Props(
       new JvmExecutor(
@@ -39,7 +40,8 @@ object JvmExecutor {
         in, out,
         exitTimeout, outputDrainTimeAtExit,
         heatbeatInterval,
-        processDirPath
+        processDirPath,
+        exposedPropNames
       )
     )
 
@@ -165,6 +167,38 @@ object JvmExecutor {
 
     hooks
   }
+
+  // From https://docs.oracle.com/javase/8/docs/api/java/lang/System.html#getProperties--
+  private[landlord] val StandardPropNames = List(
+    "java.version",
+    "java.vendor",
+    "java.vendor.url",
+    "java.home",
+    "java.vm.specification.version",
+    "java.vm.specification.vendor",
+    "java.vm.specification.name",
+    "java.vm.version",
+    "java.vm.vendor",
+    "java.vm.name",
+    "java.specification.version",
+    "java.specification.vendor",
+    "java.specification.name",
+    "java.class.version",
+    "java.class.path",
+    "java.library.path",
+    "java.io.tmpdir",
+    "java.compiler",
+    "java.ext.dirs",
+    "os.name",
+    "os.arch",
+    "os.version",
+    "file.separator",
+    "path.separator",
+    "line.separator",
+    "user.name",
+    "user.home",
+    "user.dir"
+  )
 }
 
 /**
@@ -195,7 +229,8 @@ class JvmExecutor(
     in: Source[ByteString, NotUsed], out: Promise[Source[ByteString, NotUsed]],
     exitTimeout: FiniteDuration, outputDrainTimeAtExit: FiniteDuration,
     heatbeatInterval: FiniteDuration,
-    processDirPath: Path
+    processDirPath: Path,
+    exposedPropNames: Seq[String]
 ) extends Actor with ActorLogging with Timers {
 
   import JvmExecutor._
@@ -396,15 +431,19 @@ class JvmExecutor(
                   stdin.init(stdinIs)
                   stdout.init(stdoutPos)
                   stderr.init(stderrPos)
-                  val props = new Properties(properties.fallback)
-                  props.setProperty("user.dir", processDirPath.toAbsolutePath.toString)
 
+                  val props = new Properties()
+                  (StandardPropNames ++ exposedPropNames).foreach { exposedPropName =>
+                    val exposedPropValue = properties.fallback.getProperty(exposedPropName)
+                    if (exposedPropValue != null) props.setProperty(exposedPropName, exposedPropValue)
+                  }
+                  props.setProperty("user.dir", processDirPath.toAbsolutePath.toString)
                   javaConfig.props.foreach {
                     case (name, value) =>
                       props.setProperty(name, value)
                   }
-
                   properties.init(props)
+
                   securityManager.init(new SecurityManager() {
                     override def checkExit(status: Int): Unit =
                       throw ExitException(status) // This will be caught as an uncaught exception

@@ -117,7 +117,8 @@ class JvmExecutorSpec extends TestKit(ActorSystem("JvmExecutorSpec"))
           in, out,
           12.seconds.dilated, 100.milliseconds.dilated,
           1.second,
-          processDirPath
+          processDirPath,
+          List.empty
         ))
 
       val outputOk =
