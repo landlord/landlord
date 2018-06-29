@@ -6,8 +6,9 @@ use std::io::prelude::*;
 use std::net::TcpStream;
 use std::os::unix::net::UnixStream;
 use std::sync::mpsc::*;
-use std::{env, io, process, str};
+use std::{env, io, process, str, time};
 
+const RETRY_DELAY_MILLIS: u64 = 5000;
 const VERSION: &'static str = env!("CARGO_PKG_VERSION");
 
 const USAGE: &'static str = "Usage: landlord [-options] class [args...]
@@ -23,7 +24,8 @@ where options include:
     -version      print product version and exit
     -showversion  print product version and continue
     -? -help      print this help message
-    -host | -H    host to connect to. available schemes: \"unix\", \"tcp\"";
+    -host | -H    host to connect to. available schemes: \"unix\", \"tcp\"
+    -wait         if provided, wait until landlordd is ready before connecting";
 
 fn main() {
     let args: Vec<String> = env::args().collect();
@@ -39,21 +41,27 @@ fn main() {
                 ref class,
                 ref args,
             } => match parsed.host {
-                Host::Unix(path) => handle_execute_class(
-                    parsed.cp.as_slice(),
-                    class,
-                    args,
-                    parsed.props.as_slice(),
-                    || UnixStream::connect(&path),
-                ),
+                Host::Unix(path) => {
+                    handle_execute_class(
+                        parsed.cp.as_slice(),
+                        class,
+                        args,
+                        parsed.props.as_slice(),
+                        parsed.wait,
+                        || UnixStream::connect(&path),
+                    );
+                }
 
-                Host::Tcp(address) => handle_execute_class(
-                    parsed.cp.as_slice(),
-                    class,
-                    args,
-                    parsed.props.as_slice(),
-                    || TcpStream::connect(&address),
-                ),
+                Host::Tcp(address) => {
+                    handle_execute_class(
+                        parsed.cp.as_slice(),
+                        class,
+                        args,
+                        parsed.props.as_slice(),
+                        parsed.wait,
+                        || TcpStream::connect(&address),
+                    );
+                }
             },
 
             ExecutionMode::Exit { code } => {
@@ -90,12 +98,21 @@ fn handle_execute_class<IO, NewS, S>(
     class: &S,
     args: &[S],
     props: &[(S, S)],
+    wait: bool,
     mut new_stream: NewS,
-) where
+) -> ()
+where
     IO: IOStream + Read + Send + Write + 'static,
     NewS: FnMut() -> io::Result<IO>,
     S: AsRef<str>,
 {
+    if wait {
+        wait_until_ready(
+            &mut new_stream,
+            time::Duration::from_millis(RETRY_DELAY_MILLIS),
+        )
+    }
+
     match new_stream() {
         Err(ref mut e) => {
             eprintln!("landlord: failed to connect: {:?}", e);
