@@ -51,8 +51,10 @@ lazy val daemon = project
     packageName in Universal := "landlord",
     dockerBaseImage := "openjdk:8-jre-alpine",
     dockerCommands += Cmd("USER", "root"),
+    dockerCommands += Cmd("RUN", "apk", "add", "--no-cache", "shadow"),
     dockerCommands += Cmd("RUN", "mkdir", "-p", "/var/run/landlord"),
     dockerCommands += Cmd("RUN", "chown", daemonUser.value, "/var/run/landlord"),
+    dockerCommands += Cmd("RUN", "usermod", "-d", "/var/run/landlord", daemonUser.value),
     dockerCommands += Cmd("USER", daemonUser.value),
     bashScriptExtraDefines ++= Seq(
       // Configuration for when running in a container
