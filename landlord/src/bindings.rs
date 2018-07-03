@@ -5,8 +5,50 @@ use std::io::prelude::*;
 use std::net::TcpStream;
 use std::os::unix::net::UnixStream;
 use std::sync::mpsc::*;
-use std::{fs, io, marker, net, path, process, thread};
+use std::{fs, io, marker, net, path, process, thread, time};
 use tar::Builder;
+
+/// uses new_stream to open a connection to
+/// landlordd. if it fails in an unexpected manner,
+/// i.e. landlordd isn't ready yet, it retries
+/// after sleeping for some time.
+pub fn wait_until_ready<NewS, IO>(new_stream: &mut NewS, sleep_time: time::Duration) -> ()
+where
+    NewS: FnMut() -> io::Result<IO>,
+    IO: IOStream + Read + Write,
+{
+    loop {
+        match new_stream() {
+            Err(_) => {}
+
+            Ok(mut s) => {
+                // write an unknown command to landlordd, upon which
+                // it will respond with three question marks (ASCII 63)
+                // otherwise we'll keep retrying
+
+                let question_mark: u8 = 63;
+
+                let result = s.write_all(&[question_mark])
+                    .and_then(|_| s.flush())
+                    .and_then(|_| s.shutdown(net::Shutdown::Write));
+
+                if result.is_ok() {
+                    if let Some(bs) = read_bytes(&mut s, 3).ok() {
+                        if bs.len() == 3
+                            && bs[0] == question_mark
+                            && bs[1] == question_mark
+                            && bs[2] == question_mark
+                        {
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        thread::sleep(sleep_time);
+    }
+}
 
 /// Binds everything together and ensures that events received from a given `reader` will
 /// be handled accordingly.
@@ -35,7 +77,13 @@ where
             stream.write_all(&bs)
         }
     };
-    let session_writer = |bs: Vec<u8>| new_stream().and_then(|ref mut s| s.write_all(&bs));
+    let session_writer = |bs: Vec<u8>| {
+        new_stream().and_then(|ref mut s| {
+            s.write_all(&bs)
+                .and_then(|_| s.flush())
+                .and_then(|_| s.shutdown(net::Shutdown::Write))
+        })
+    };
     let std_out = |bs: Vec<u8>| stdout.write_all(&bs);
     let std_err = |bs: Vec<u8>| stderr.write_all(&bs);
 
@@ -242,7 +290,7 @@ where
             .and_then(|_| {
                 tar_builder
                     .finish()
-                    .and(tar_builder.into_inner())
+                    .and_then(|_| tar_builder.into_inner())
                     .and_then(|ref mut stream| stream.finish())
                     .and_then(|ref mut stream| match stream {
                         &mut None => Err(io::Error::new(
@@ -306,8 +354,7 @@ impl<W: Write> BlockSizeWriter<W> {
         let operation = if let Some(ref mut stream) = self.stream {
             let bytes_left = self.block_size - (self.written % self.block_size);
             let bytes = vec![0; bytes_left];
-
-            stream.write_all(&bytes).and(stream.flush())
+            stream.write_all(&bytes).and_then(|_| stream.flush())
         } else {
             Ok(())
         };

@@ -20,6 +20,7 @@ pub struct JavaArgs {
     pub props: Vec<(String, String)>,
     pub host: Host,
     pub version: bool,
+    pub wait: bool,
 }
 
 pub fn parse_java_args<S: AsRef<str>>(args: &[S]) -> JavaArgs {
@@ -36,6 +37,7 @@ pub fn parse_java_args<S: AsRef<str>>(args: &[S]) -> JavaArgs {
         props: vec![],
         host: Host::Unix("/var/run/landlord/landlordd.sock".to_string()),
         version: false,
+        wait: false,
     };
 
     let mut iter = args.iter().map(|r| r.as_ref());
@@ -130,6 +132,10 @@ pub fn parse_java_args<S: AsRef<str>>(args: &[S]) -> JavaArgs {
                 }
             }
 
+            Some(flag) if flag == "-wait" => {
+                jargs.wait = true;
+            }
+
             Some(flag) if noop_flags.contains(&flag) => {}
 
             Some(flag) => jargs.errors.push(format!("Unrecognized option: {}", flag)),
@@ -152,6 +158,7 @@ fn test_parse_java_args_help() {
             props: vec![],
             host: Host::Unix("/var/run/landlord/landlordd.sock".to_string()),
             version: false,
+            wait: false,
         }
     );
 
@@ -164,6 +171,7 @@ fn test_parse_java_args_help() {
             props: vec![],
             host: Host::Unix("/var/run/landlord/landlordd.sock".to_string()),
             version: false,
+            wait: false,
         }
     );
 }
@@ -179,6 +187,7 @@ fn test_parse_java_version() {
             props: vec![],
             host: Host::Unix("/var/run/landlord/landlordd.sock".to_string()),
             version: true,
+            wait: false,
         }
     );
 }
@@ -197,6 +206,7 @@ fn test_parse_java_showversion() {
             props: vec![],
             host: Host::Unix("/var/run/landlord/landlordd.sock".to_string()),
             version: true,
+            wait: false,
         }
     );
 }
@@ -215,6 +225,7 @@ fn test_parse_java_jar() {
             props: vec![],
             host: Host::Unix("/var/run/landlord/landlordd.sock".to_string()),
             version: false,
+            wait: false,
         }
     );
 }
@@ -276,6 +287,7 @@ fn test_all() {
             "-d32",
             "-d64",
             "-server",
+            "-wait",
             "-host",
             "unix:///dev/null",
             "-cp",
@@ -297,6 +309,7 @@ fn test_all() {
             ],
             host: Host::Unix("/dev/null".to_string()),
             version: false,
+            wait: true,
         }
     );
 }
@@ -315,6 +328,7 @@ fn test_invalid_flags() {
             props: vec![],
             host: Host::Unix("/var/run/landlord/landlordd.sock".to_string()),
             version: false,
+            wait: false,
         }
     );
 }
