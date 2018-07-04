@@ -1,0 +1,1 @@
+This directory exists so that we can initialize and chown /var/run/landlord despite building FROM scratch. This allows us to build the smallest Docker image possible, since the client itself is completely statically linked.
