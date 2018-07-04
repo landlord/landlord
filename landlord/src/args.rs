@@ -23,14 +23,8 @@ pub struct JavaArgs {
     pub wait: bool,
 }
 
-pub fn parse_java_args<S: AsRef<str>>(args: &[S]) -> JavaArgs {
-    // We want to aim to be a drop-in replacement for java, so we have to roll our own arg parser
-    // because DocOpt/Clap/et al don't have the required features to match the rather strange java
-    // arguments.
-
-    let noop_flags = ["-server", "-d64", "-d32"];
-
-    let mut jargs = JavaArgs {
+fn default() -> JavaArgs {
+    JavaArgs {
         cp: vec![".".to_string()],
         errors: vec![],
         mode: ExecutionMode::Help { code: 1 },
@@ -38,7 +32,17 @@ pub fn parse_java_args<S: AsRef<str>>(args: &[S]) -> JavaArgs {
         host: Host::Unix("/var/run/landlord/landlordd.sock".to_string()),
         version: false,
         wait: false,
-    };
+    }
+}
+
+pub fn parse_java_args<S: AsRef<str>>(args: &[S]) -> JavaArgs {
+    // We want to aim to be a drop-in replacement for java, so we have to roll our own arg parser
+    // because DocOpt/Clap/et al don't have the required features to match the rather strange java
+    // arguments.
+
+    let noop_flags = ["-server", "-d64", "-d32"];
+
+    let mut jargs = default();
 
     let mut iter = args.iter().map(|r| r.as_ref());
 
@@ -152,26 +156,16 @@ fn test_parse_java_args_help() {
     assert_eq!(
         parse_java_args(&["-?"]),
         JavaArgs {
-            cp: vec![".".to_string()],
-            errors: vec![],
             mode: ExecutionMode::Help { code: 0 },
-            props: vec![],
-            host: Host::Unix("/var/run/landlord/landlordd.sock".to_string()),
-            version: false,
-            wait: false,
+            ..default()
         }
     );
 
     assert_eq!(
         parse_java_args(&["-help"]),
         JavaArgs {
-            cp: vec![".".to_string()],
-            errors: vec![],
             mode: ExecutionMode::Help { code: 0 },
-            props: vec![],
-            host: Host::Unix("/var/run/landlord/landlordd.sock".to_string()),
-            version: false,
-            wait: false,
+            ..default()
         }
     );
 }
@@ -181,13 +175,9 @@ fn test_parse_java_version() {
     assert_eq!(
         parse_java_args(&["-version"]),
         JavaArgs {
-            cp: vec![".".to_string()],
-            errors: vec![],
             mode: ExecutionMode::Exit { code: 0 },
-            props: vec![],
-            host: Host::Unix("/var/run/landlord/landlordd.sock".to_string()),
             version: true,
-            wait: false,
+            ..default()
         }
     );
 }
@@ -197,16 +187,12 @@ fn test_parse_java_showversion() {
     assert_eq!(
         parse_java_args(&["-showversion", "-jar", "test.jar"]),
         JavaArgs {
-            cp: vec![".".to_string()],
-            errors: vec![],
             mode: ExecutionMode::JarFile {
                 file: "test.jar".to_string(),
                 args: vec![],
             },
-            props: vec![],
-            host: Host::Unix("/var/run/landlord/landlordd.sock".to_string()),
             version: true,
-            wait: false,
+            ..default()
         }
     );
 }
@@ -216,16 +202,11 @@ fn test_parse_java_jar() {
     assert_eq!(
         parse_java_args(&["-jar", "test.jar", "arg1", "arg2"]),
         JavaArgs {
-            cp: vec![".".to_string()],
-            errors: vec![],
             mode: ExecutionMode::JarFile {
                 file: "test.jar".to_string(),
                 args: vec!["arg1".to_string(), "arg2".to_string()],
             },
-            props: vec![],
-            host: Host::Unix("/var/run/landlord/landlordd.sock".to_string()),
-            version: false,
-            wait: false,
+            ..default()
         }
     );
 }
@@ -319,16 +300,12 @@ fn test_invalid_flags() {
     assert_eq!(
         parse_java_args(&["-hello-world", "com.hello.Example"]),
         JavaArgs {
-            cp: vec![".".to_string()],
             errors: vec!["Unrecognized option: -hello-world".to_string()],
             mode: ExecutionMode::Class {
                 class: "com.hello.Example".to_string(),
                 args: vec![],
             },
-            props: vec![],
-            host: Host::Unix("/var/run/landlord/landlordd.sock".to_string()),
-            version: false,
-            wait: false,
+            ..default()
         }
     );
 }
