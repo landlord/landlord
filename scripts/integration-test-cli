@@ -29,7 +29,7 @@ wait
 # Start landlordd
 rm -rf "$DIR"
 mkdir -p "$DIR"
-landlordd/daemon/target/universal/stage/bin/landlordd --host "unix://$DIR/landlordd.sock" --host "tcp://127.0.0.1:2375" &
+landlordd/daemon/target/universal/stage/bin/landlordd --host "unix://$DIR/landlordd.sock" --host "tcp://127.0.0.1:2376" &
 LANDLORDD_PID="$!"
 
 # Test landlord -wait parameter by starting before landlordd is given time to start
@@ -38,7 +38,7 @@ OUTPUT1=$(echo Testing | ./landlord/target/release/landlord -wait -Dgreeting='he
 # Run a program that uses stdin and properties
 OUTPUT2=$(echo Testing | ./landlord/target/release/landlord -Dgreeting='hello world' -H "unix://$DIR/landlordd.sock" -cp landlordd/test/target/scala-2.12/classes example.Hello)
 # Run the same program again, but this time over TCP
-OUTPUT3=$(echo Testing | ./landlord/target/release/landlord -Dgreeting='hello world' -H "tcp://127.0.0.1:2375" -cp landlordd/test/target/scala-2.12/classes example.Hello)
+OUTPUT3=$(echo Testing | ./landlord/target/release/landlord -Dgreeting='hello world' -H "tcp://127.0.0.1:2376" -cp landlordd/test/target/scala-2.12/classes example.Hello)
 
 # Shutdown landlordd
 kill "$LANDLORDD_PID"
