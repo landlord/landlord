@@ -10,7 +10,7 @@ if [ "$DOCKER_USERNAME" = "" ] || [ "$DOCKER_PASSWORD" = "" ]; then
   exit 3
 fi
 
-version=$(git describe --abbrev=0 --tags | sed 's/^v//')
+version=$(git name-rev --name-only HEAD | sed 's/^tags\/v//')
 
 # Normalize dirs
 SCRIPT_NAME="${BASH_SOURCE[0]}"
@@ -28,12 +28,10 @@ export RELEASE_VERSION=$version
   cargo clean && \
   cargo test --target=x86_64-unknown-linux-musl --release && \
   cargo build --target=x86_64-unknown-linux-musl --release && \
-  docker build --no-cache -t "landlord/landlord:$version" .) &
+  docker build --no-cache -t "landlord/landlord:$version" .)
 
 (cd landlordd && \
-  sbt clean daemon/docker:publishLocal) &
-
-wait
+  sbt clean daemon/docker:publishLocal)
 
 # Push images
 echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USERNAME" --password-stdin

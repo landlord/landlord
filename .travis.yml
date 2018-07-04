@@ -15,7 +15,7 @@ matrix:
         # Ensure changes to the cache aren't persisted
         - rm -rf $HOME/.ivy2/cache/com/github/huntc/landlord
         # Delete all ivydata files since ivy touches them on each build
-        - find $HOME/.ivy2/cache -name "ivydata-*.properties" | xargs rm
+        - find $HOME/.ivy2/cache -name "ivydata-*.properties" -delete
       before_script:
         - cd landlordd
         - unset _JAVA_OPTIONS
@@ -35,7 +35,7 @@ matrix:
         # Ensure changes to the cache aren't persisted
         - rm -rf $HOME/.ivy2/cache/com/github/huntc/landlord
         # Delete all ivydata files since ivy touches them on each build
-        - find $HOME/.ivy2/cache -name "ivydata-*.properties" | xargs rm
+        - find $HOME/.ivy2/cache -name "ivydata-*.properties" -delete
       install:
         - curl https://sh.rustup.rs/ | sh -s -- -y
       before_script:
@@ -54,15 +54,18 @@ matrix:
         # Ensure changes to the cache aren't persisted
         - rm -rf $HOME/.ivy2/cache/com/github/huntc/landlord
         # Delete all ivydata files since ivy touches them on each build
-        - find $HOME/.ivy2/cache -name "ivydata-*.properties" | xargs rm
+        - find $HOME/.ivy2/cache -name "ivydata-*.properties" -delete
       install:
-        - "! { git describe --abbrev=0 --tags | grep ^v; } || { curl https://sh.rustup.rs/ | sh -s -- -y; }"
+        - sudo apt-get install -y musl-tools
+        - "! { git name-rev --name-only HEAD | grep ^tags/v; } || { curl https://sh.rustup.rs/ | sh -s -- -y; }"
       before_script:
         - unset _JAVA_OPTIONS
         - export PATH="$HOME/.cargo/bin:$PATH"
       script:
-        - "! { git describe --abbrev=0 --tags | grep ^v; } || scripts/release-dockerhub"
+        - "! { git name-rev --name-only HEAD | grep ^tags/v; } || ( cd landlord && rustup target add x86_64-unknown-linux-musl )"
+        - "! { git name-rev --name-only HEAD | grep ^tags/v; } || scripts/release-dockerhub"
 env:
   global:
-    - secure: "Tyjntbdf89m/CjfffamyGJRafXRoh97y2swN3cmu2IwxRRKGMeStRuy5ZGFkR7I40oDAdSej7+Ub+zP215KsrAoA0ilQb3WcFoRDaR5HD/kTmQjBVaAg3QfjkN9DFNzMb5dB5kqVQDSCV7vcmlM3OT2iggA7Qe1uQsvUkwdQwRDcKSjUO9L7W2EK0/Vc0exhhoaxSOXoSz/pUa5HzeSef9JDh4mK/7SxqIY41RiPxzaMWB57tLDM5bhJH6w2QXFvxvTEeGcmNdrVZnAsdK7W/XV/ugWxj6faddtqvQds0Cd84XFoj+tPACQZYG9kOXLPt7HjgmbyDAsEQIAZy1WgYnMM/OG7G0wccMVpLCh4C2CRPH1N9TfiQ/I+wXXJiCW7ZtGfUzU9CEXMF2bWA/43qpQiMAqy7spDz6GGH0zARcCfjtq8pkH4Zg1xAOb4KkZx/8hrUatmd01c2jDnD8XeZjnoJu/IEbc/nd08B7ESQU93yn2acHYNfPNepiXNcPgmAtZ5Bv/YvpCf8WHt/gVi9eJH4Fbh+nzsxR/+EZ3cR/TMHFYhJsvVSGPrpQz9lKvv+oTR1XtvU6Q9SXunURQ/7NGej9r5mLla2FN18P/gzL0hVEX0+Lsncsp3VvKhB1B3JuLyZ9/S9qwgpR87U42TcJzgP1mAYP2cmKlFXhx46Cc="
-    - secure: "VsykXqtZqTOopbeLlGy1LRTIW2j2GB1inmMqvL/9uhZ0OeEfMnuVHnw+S88+AFR3Rv8DKKyzzl+nSnxJT5lOVevUgZ4jRMwMAe74E9zreJ6JJ622HOXmwqQJENTcnLHQ/UUlzUwWv8wDZZ+E6bF/qMFIvLqXJSftUfkr63+ypzR7jxcplXlqLCzkMhOqxDh31AjAG7dH04hKFk880u3UKn6/2qyK1Z+XjxEp44ngpG6eCbYf1dmeHX7wRNfOIb9YoiWURR5khtGaTsF2zMFwlkmlj4EI9r6TQKKThx5imiljAd9C65AgMuPEJc0nkeUHTW4W2/6hY/rHwy7FVMy3dC7sxOs42xE+vE7lku8sNk0Ri/WYwOqBNKBmKr5WoN5le/TdoajXUUQVQ0jYIl79BCqWkhLCl/3jnAvsVELRZJt6Pg2d6GR2zwAvuKYqHPFKzGX1JHPXcMrAYAF4gAPV6nFbdFzvt5hIZEUxpEYFyXpCOcxY049+k1UAIfoQQ5YbzpCo9GD8kbR8dEuph0RSYJVDu27wEqvTornwasPXA9yBAA1agrpDI+mNEC5316d2HKiBPrxuuWPNrey0CMGR9rICqFQI3Jb9zHzXR7F/7sIPS9k32W7BOELDCfhaXjV3WZaHK/PcQtb+SSh0E9a9o8Nh72ilDSmvZsNz3RAnpaI="
+    - secure: "jkZ7f3MSiVC8XfiEePWLH7tWUJfHAoIpna4XOnXAJX3TtjEHeS5OQnVsSKHiItBZVGTWFxsHvB55/uNZwLDYA0enxcFPgW6tTuim8G/meIuczMRmeIMvCgw78834SL9QzMVIPsmUdr6Ic9G/P3zQ/NcV8mpLJbzeTLmWQzBgagO/Z0bcjH2Wb56DYuXzZR0uH99AyFOMs+e/rCfR0cFQkL9zHdUx18Qhbrj6mE8LlEak8aznRrQU6x+DU93nDE5GGfLb9P1/kx+FdWvDrslnNMzsE0A1d74JTsUg38r6qF20n1bcer9OdNB2ewoI1oEaKnlEqWC7bra7a6Bsli7HFsvdE+TRI/qowt2YUoXhF04VnPZVU6SuSqavxweZJRUskQuqg9A7iv9yOjiTqZIzM5Nx/7if7rlS+e6tHDYavX5JBv1o97IOxIg1YA6J7wRRqQf3hLsuvhfWuwBLVDGXq8QlfAUBgXIbwo7LotySbPcr8KVBaznGFMezGgLLA3krpEtK4yfYgA5OoRylgPgipkvsCvspjJ7FDK4BtbBnaRmV7ru8eJfKXsh9SkRYzkCr+A+LdV4O6UsXAMwBsptvnYwlMag7lJR2ud6kko5UKE6FCfY4CnR+Tb01lSZbHjccpjXh8lvo328e9tKfmfWgg92QisXmM+hWEhXd0ZgGyzA="
+    - secure: "onpefmdHfCFMJDPmaNoOhhVKKSMGMZ/LosGbR1NC5Fsd6J2rRV1UgNPACKvnUQNNnr5IO+/xx4nxJuYX4X/sR6gTp0wtiMaPopGqOwcpqGn+id5CKmG8ngEHmGTUBRcHgHsC5nef+yeaYJuYVcogne9DbuJvW1DMiUTB3sgJv0iJ4U1Idq6F/3BVrDWrkv4VeH3GUEcVMl7de5g036XIGMORT/CBx4oagy6Lf74LFwa70JtTHBrKEFH3FTiA/s32n968XnAVo2/DhDalhyYgm8aSyo8S2xsnhC43cQHOmMDtPgaFAxkVxBrCrP6W9743q23GzxBhFuGkjq6+m+O/HgnhYteyAZvq60fheGZaT+A8mrdmM0h/BFe1bpo7SJHK0qtAVt7HWqf3V6+X+4GVTmyFhep5vhrlP+ad+C9GDFfGXjV0MZD4VFKYjCT0TKmNuosAb8ktot+ictqbA3EPjsekxwUxc4OZebJtVIWhDyxskPT2kwfUjtbLaF8KG2vRmmRTmBpgIjpg/O+LvR6GzSReyp0eg5/WuhABx1EllUdIi7xptiabpHGBAFEgoH89bwDS6oLA9VBnlPuUYAEB8igtVk9aGAQ4VURRyklCXHy3hp7SxOD+ntDqoUInCcK8TekdfCyM2FMq9jUdsZ6oONobCfP7kgArEL5it95st/A="
+
