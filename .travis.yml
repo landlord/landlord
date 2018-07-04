@@ -56,13 +56,13 @@ matrix:
         # Delete all ivydata files since ivy touches them on each build
         - find $HOME/.ivy2/cache -name "ivydata-*.properties" | xargs rm
       install:
-        - "{ git describe --abbrev=0 --tags | grep ^v; } &>/dev/null && { curl https://sh.rustup.rs/ | sh -s -- -y; } || true"
+        - "! { git describe --abbrev=0 --tags | grep ^v; } || { curl https://sh.rustup.rs/ | sh -s -- -y; }"
       before_script:
         - unset _JAVA_OPTIONS
         - export PATH="$HOME/.cargo/bin:$PATH"
       script:
-        - "{ git describe --abbrev=0 --tags | grep ^v; } &>/dev/null && scripts/release-dockerhub || true"
+        - "! { git describe --abbrev=0 --tags | grep ^v; } || scripts/release-dockerhub"
 env:
   global:
-  - secure: hvBfA+nR0Utzlq4GzELBBaJkxrJDVVl2rzUrL81Vyn9ORz9B6N9DF4ZxAUyxOMRqPWPFI/I7k7F116n5f+oRIM2kLeQwk2dZme5gmcPN4e+6tMKIzXHj8cJBmxMX3FhbffpFL3CzVL0Yp6SDdjUsVNN9jdxmsXW4PBEZTjWLaKEPF60rMXDlsznt1k8bcbgjMuIsS8w+BO36nrbvwju6L+yw55SkVacIqBlnwk5ENbCiQrsS5i7Imxn3f5wPOZIouFqDaK5sviXdUT/6tGThOMmToYJWtcSS5C91Ljg7SW0rrf9527IypAtRFzlEFYX0wvKHv3PSJSJjlZYzKEjSE70ieFBF0ko4oy7v3VEAA0U3ZOYpUslwzYt3cfilvDmLSbKH9F2KCuJHAYTwYFu1qHCyNL+zWRI91LUJhvSI2xhAQN4PJd+T2dtgPcrwfWvRD2bx0A9UY/U+Kd8maOW//3DIcDHrDel/txbNEUk/PBR5PX3UXdfXgNm5P5yCo1V3w01a6p/xy3Ont5NJLEFAOLVNxZ3exUJqVukYb/gG7Wx3pdRibwk0A9GcYo0kV71SXIs1u4orKHE5Toj/hM3meqSj40AFI8WGLJIqwCBx+23mUND/Sq1pxHc3lB+M3BatCQwsKmd2r5p7YFytSOWi98X4y2L6bVLsIVPwiFQSYZk=
-  - secure: SkFVs+h0p0I1Tlg9HJnyjHNJcGcsv4ggBBFpmYTr3vReKSOqwGHJ9OBn224ReKZ+mmusXnTiDnRpUfCSt266wlGFe5lQ9DRWAy0eQUUVB7e1sN1UBIjBhi5ndKblAfxFiKgOeKu8qvyYDMjLsNNN/NcvaGRs8wubh9uZmFQMprPJ6ehpF2IggDgFVuE2xeLvADDi3Ls3Cs52+KS+rOo+JPfAbASkYfqdtV/lOoRsR9t63GV3YyT7jnSvLDT/utv92AHGGmhMlsY/0ov4dY8HWQaRb6Xo0wqFBL5ZrYcwWlOwvEo3zbetkYWi1mSppKgWME7Pr5+htYWclKHL5cKSbmwsblN0p/GRiXpSQ2vcFYjOMhKsfhg1C9DhRQueKy3QC4qwedatmOud6RV0gNnJ6SkJ9P2N4obUkDWejWb+MICgDKAVrCw7MO59ILlMUDOla6x6MK9VTEzTNARyDTYMuqB4USQeblekgbCSKpm0BXNprIutaRvGmGdgAole7dK5+3CqkdacvE74EdJ3POEe+hWipcOp7EmvYC+AHhCxKcm98c37r2C7Go9ETIUrMHp/ow+QwQMfMJkgFECwKczS+vTghDtOwCp1cFfMg1lqa/7PQoGl4egKj78Qh0LxZB5GYj429Z737sRTTtJQpJCXE5O3QAQ3L7IJEhGNBpJrEQU=
+    - secure: "AI6heyO6uufRg780luQezS3P3caGs2qwS1ZtvD6Yj56FvNLFpWYv2aKSswtRag5JV/kzn4akkT4BJectI0/zmdmwVyiP1MPkxv2iPOuMUAzsEVKxkSoNc1RMmYCJ2EOC+iiJ4wDQsWxnOAQxK63PQkttyfd8JAaTF5HVJYVcu0HFc7GMYwg/2U0HHVKNOxBPUApz+/zAm4JIjSbbbw7phKLWzFRU9pIPmYNtDuo+ePuJooQU2JnF2wVuiZeD2x4/GhfFw+7pGi/3OpS/wSeqTPzRns9ZTcicStW03YWnbhPjZuPe0bYkcbknIvqy3kuvx6ysLYdmG0f3pbSzpot24l9hieF8OwIRB7afEF2dIgqH8NGJsRL6VEYSx+uFLegB3rgccQncjs3AB9MwFIZJXbcUZRz/9EhbIB3+6w7XuWmpFSkY2ynbyr0ilzhVFisesDUGkm/FMZ8IZ866ytxhBLxysN7JYrtmCV5pdDvYye9nYgRWXdOls6xQHcb8GWicfbi+TxOpcRFMw1e4KjUOtjqqyscBj4YyNIeo7aCM35Gst3FJUtsw6AY0zCB4CwkU+a4Vdrq2vUrHz3k3zQpZUMVKjjKSTAnmD/7sMDQhCgkZTRbKQAQ6jwA5Ovqb765eCSIg2G35oZRqxQI6vx4SyBTSKF/usLYUX0TvaleorDk="
+    - secure: "laIclxKaL+8JgwELSuP3yJcHOJHm1NDoLzDKB774sIXXWUACOCkCSePAssAYvmpJGfLDfrNxZDPf/n/uwXb5hCsEaxIJas9yISUBzkajb+TItC6Cm6zrSVqzTodtq6f3H2602PFPx3daydLPSMAv5PcjqGuJVTy9+BsFsRch02l0lBVoiqsFNuQpGACUcKpgKBjiyrJuiU4xTFxTJIlVygPWDs6Bic19e+P7hP5msrupUi/nj2RDAtPke7cT0MJwbg+ABtEoE6UYcYpJ8PoF9VzDRfgr8D/uTrMH/Wp2uwZKuWFP6C3SND8uzp0NuZMKNpcx6ZHHpQ6o33kPTGe2GV8VTfd9RvDQWmuFJo0mcJqDVd+JG67XFYilzUhzrfik7jM8SC/7I/MEDF8jZwu1uGuTdKEMyVY5HWEUvX8BoEKtDYSINNHi/3033zg6FLBgeqTVLGH3SjoQRUvIWIX0qio5ztz+kAK2pS7xQVzF2lngNKdd68ajZD0L3582FkcWAsRttw7ZC214tPapfmhUbCYjTzeYe+2qwnpasiZPuZhQ0FsaZWzWrj/xKzKmnlQD2UgWIwlZZ4xyUwdbsdD1h/flpP6OpsQWmmcGBBnVnLXFNdr1Si5us5EuewLvmuF8sXTPPyYTQNA8/d0gK8Jh8lUdaBC7U+KHWOOxea/V9uA="
