@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+
+set -e
+
+# This script is invoked by Travis. It builds the CLI and daemon and
+# pushes images for each to Dockerhub. Travis will only run this
+# script when a tag starting with "v" is pushed, e.g. "v0.0.1"
+
+if [ "$DOCKER_USERNAME" = "" ] || [ "$DOCKER_PASSWORD" = "" ]; then
+  exit 1
+fi
+
+version=$(git describe --abbrev=0 --tags | sed 's/^v//')
+
+# Normalize dirs
+SCRIPT_NAME="${BASH_SOURCE[0]}"
+if [ -h "$SCRIPT_NAME" ]; then
+    SCRIPT_NAME="$(readlink "$SCRIPT_NAME")"
+fi
+ROOT_DIR="$(cd "$(dirname "$SCRIPT_NAME")" && cd .. && pwd)"
+cd "$ROOT_DIR"
+
+# Specify versions for landlordd and landlord
+export RELEASE_VERSION=$version
+
+# Build projects
+(cd landlord && \
+  cargo clean && \
+  cargo test --target=x86_64-unknown-linux-musl --release && \
+  cargo build --target=x86_64-unknown-linux-musl --release && \
+  docker build --no-cache -t "landlord/landlord:$version" .) &
+
+(cd landlordd && \
+  sbt clean daemon/docker:publishLocal) &
+
+wait
+
+# Push images
+echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USERNAME" --password-stdin
+docker push "landlord/landlordd:$version"
+docker push "landlord/landlord:$version"
