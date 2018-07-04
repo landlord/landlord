@@ -7,7 +7,7 @@ set -e
 # script when a tag starting with "v" is pushed, e.g. "v0.0.1"
 
 if [ "$DOCKER_USERNAME" = "" ] || [ "$DOCKER_PASSWORD" = "" ]; then
-  exit 1
+  exit 3
 fi
 
 version=$(git describe --abbrev=0 --tags | sed 's/^v//')
