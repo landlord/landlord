@@ -213,21 +213,16 @@ docker volume create \
 (cd landlordd && sbt daemon/docker:publishLocal)
 ```
 
-...and then run it assuming the image being published as `daemon:0.1.0-SNAPSHOT` (substitute accordingly):
+...and then run it assuming the image being published as `landlord/landlordd:0.1.0-SNAPSHOT` (substitute accordingly):
 
 ```
 docker run \
   --rm \
   -v landlord:/var/run/landlord \
-  daemon:0.1.0-SNAPSHOT
+  landlord/landlordd:0.1.0-SNAPSHOT
 ```
 
-To publish to the Docker registry, if you have permission, and the image being published as `daemon:0.1.0-SNAPSHOT` (substitute accordingly):
-
-```
-docker tag daemon:0.1.0-SNAPSHOT landlord/daemon
-docker push landlord/daemon
-```
+To publish to the Docker registry, push a git tag to the repository, e.g. `git tag v0.2.0 && git push origin v0.2.0`. Travis will then build the tag and publish images to DockerHub.
 
 ### landlord
 
@@ -237,7 +232,7 @@ First, cross build the client for the Linux target. If you're on Linux then this
 (cd landlord && rustup target add x86_64-unknown-linux-musl && cargo build --target=x86_64-unknown-linux-musl --release)
 ```
 
-If you have OS X then you're going to need to invoke Docker to perform the build (cross compiling on OS X is problematic). 
+If you have OS X then you're going to need to invoke Docker to perform the build (cross compiling on OS X is problematic).
 Here's the command for OS X:
 
 ```
@@ -289,10 +284,9 @@ docker run \
 The Dockerfile for the above is quite minimal and is reproduced below for convenience:
 
 ```
-FROM landlord/landlord
-USER daemon
+FROM landlord/landlord:0.1.0
 COPY test/target/scala-2.12/classes /classes
-ENTRYPOINT ["/usr/local/bin/landlord", "-cp", "/classes", "-Dgreeting=Welcome", "example.Hello", "ArgOne", "ArgTwo"]
+CMD ["-cp", "/classes", "-Dgreeting=Welcome", "example.Hello", "ArgOne", "ArgTwo"]
 ```
 
 Lastly, to publish to the Docker registry, if you have permission:

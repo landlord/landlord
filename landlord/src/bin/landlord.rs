@@ -8,8 +8,9 @@ use std::os::unix::net::UnixStream;
 use std::sync::mpsc::*;
 use std::{env, io, process, str, time};
 
+const CARGO_VERSION: &'static str = env!("CARGO_PKG_VERSION");
 const RETRY_DELAY_MILLIS: u64 = 5000;
-const VERSION: &'static str = env!("CARGO_PKG_VERSION");
+const RELEASE_VERSION: Option<&'static str> = option_env!("RELEASE_VERSION");
 
 const USAGE: &'static str = "Usage: landlord [-options] class [args...]
            (to execute a class)
@@ -32,7 +33,9 @@ fn main() {
     let parsed = parse_java_args(&args[1..]);
 
     if parsed.version {
-        eprintln!("landlord version \"{}\"", VERSION);
+        let version = RELEASE_VERSION.unwrap_or_else(|| CARGO_VERSION);
+
+        eprintln!("landlord version \"{}\"", version);
     }
 
     if parsed.errors.is_empty() {

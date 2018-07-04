@@ -49,13 +49,22 @@ lazy val daemon = project
     // Native packager
     executableScriptName := "landlordd",
     packageName in Universal := "landlord",
+    packageName in Docker := "landlordd",
+    dockerUsername := Some("landlord"),
+    dockerCommands := dockerCommands.value.flatMap {
+      case cmd @ Cmd("WORKDIR", _) => Seq(
+        cmd,
+        Cmd(
+          "RUN",
+          s"""|apk add --no-cache shadow && \\
+              |mkdir -p /var/run/landlord && \\
+              |chown ${daemonUser.value} /var/run/landlord && \\
+              |usermod -d /var/run/landlord ${daemonUser.value}
+              |""".stripMargin)
+      )
+      case cmd => Seq(cmd)
+    },
     dockerBaseImage := "openjdk:8-jre-alpine",
-    dockerCommands += Cmd("USER", "root"),
-    dockerCommands += Cmd("RUN", "apk", "add", "--no-cache", "shadow"),
-    dockerCommands += Cmd("RUN", "mkdir", "-p", "/var/run/landlord"),
-    dockerCommands += Cmd("RUN", "chown", daemonUser.value, "/var/run/landlord"),
-    dockerCommands += Cmd("RUN", "usermod", "-d", "/var/run/landlord", daemonUser.value),
-    dockerCommands += Cmd("USER", daemonUser.value),
     bashScriptExtraDefines ++= Seq(
       // Configuration for when running in a container
       """addJava "-XX:+UnlockExperimentalVMOptions"""",
@@ -77,7 +86,7 @@ lazy val landlordd = project
     inThisBuild(List(
       organization := "com.github.huntc",
       scalaVersion := "2.12.6",
-      version      := "0.1.0-SNAPSHOT",
+      version      := sys.env.getOrElse("RELEASE_VERSION", "0.1.0-SNAPSHOT"),
       scalacOptions ++= Seq("-unchecked", "-deprecation"),
       ScalariformKeys.preferences := ScalariformKeys.preferences.value
         .setPreference(AlignSingleLineCaseStatements, true)
