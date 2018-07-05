@@ -180,7 +180,7 @@ pub fn app_cmdline<S: AsRef<str>>(
             .join(":"),
         class.as_ref(),
         if args.is_empty() {
-            format!("")
+            "".to_string()
         } else {
             format!(
                 "\u{0000}{}",
