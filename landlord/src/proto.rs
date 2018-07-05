@@ -43,7 +43,7 @@ where
                 return Ok(s);
             }
 
-            Ok(Input::Fail(e)) => {
+            Ok(Input::Fail(e)) | Err(e) => {
                 return Err(e);
             }
 
@@ -89,10 +89,6 @@ where
                 if let Err(e) = stderr(b) {
                     return Err(e);
                 }
-            }
-
-            Err(e) => {
-                return Err(e);
             }
         }
     }
