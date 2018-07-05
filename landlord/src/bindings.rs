@@ -8,7 +8,7 @@ use std::sync::mpsc::*;
 use std::{fs, io, marker, net, path, process, thread, time};
 use tar::Builder;
 
-/// uses new_stream to open a connection to
+/// uses `new_stream` to open a connection to
 /// landlordd. if it fails in an unexpected manner,
 /// i.e. landlordd isn't ready yet, it retries
 /// after sleeping for some time.
@@ -221,7 +221,7 @@ pub fn spawn_and_handle_stdin(sender: Sender<Input>) {
 }
 
 /// Spawns a thread and reads data from the provided `stream`. The actual logic
-/// of how much to read is done via the read_handler function.
+/// of how much to read is done via the `read_handler` function.
 pub fn spawn_and_handle_stream_read<IO>(mut stream: IO, sender: Sender<Input>)
 where
     IO: IOStream + Read + Send + Write + 'static,
@@ -236,7 +236,7 @@ where
         };
 
         if let Err(read_error) = read_handler(r, m) {
-            eprintln!("landlord: read_hadler crashed, {:?}", read_error);
+            eprintln!("landlord: read_handler crashed, {:?}", read_error);
             process::exit(1);
         }
     });
@@ -306,7 +306,7 @@ where
     })
 }
 
-/// BlockSizeWritter ensures that data written to a provided `stream`
+/// `BlockSizeWriter` ensures that data written to a provided `stream`
 /// is done in zero-padded blocks of the provided size. landlordd
 /// expects GNU-standard blocking factor of 20, so when writing tar
 /// data to it, `landlord` uses this wrapper with a `block_size` of
@@ -363,7 +363,7 @@ impl<W: Write> BlockSizeWriter<W> {
     }
 }
 
-/// Exposes underlying shutdown and try_clone functions
+/// Exposes underlying `shutdown` and `try_clone` functions
 /// for the types of host protocols we support, i.e. UDS and TCP.
 pub trait IOStream
 where
