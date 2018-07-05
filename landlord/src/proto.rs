@@ -102,8 +102,7 @@ where
 {
     loop {
         match reader(1).map(|bs| bs[0]) {
-            Ok(101) => {
-                // UTF8 'e'
+            Ok(b'e') => {
                 let result = read_payload(&mut reader)
                     .map(Input::StdErr)
                     .and_then(|msg| writer(msg));
@@ -112,8 +111,7 @@ where
                     return result;
                 }
             }
-            Ok(111) => {
-                // UTF8 'o'
+            Ok(b'o') => {
                 let result = read_payload(&mut reader)
                     .map(Input::StdOut)
                     .and_then(|msg| writer(msg));
@@ -122,9 +120,7 @@ where
                     return result;
                 }
             }
-            Ok(120) => {
-                // UTF8 'x'
-
+            Ok(b'x') => {
                 return reader(4)
                     .and_then(|bs| decode_i32(&bs))
                     .and_then(|code| writer(Input::Exit(code)));
