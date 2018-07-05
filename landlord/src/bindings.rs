@@ -33,7 +33,7 @@ where
                 if result.is_ok() {
                     if let Ok(bs) = read_bytes(&mut s, 3) {
                         if let [b'?', b'?', b'?'] = bs[..] {
-                            break
+                            break;
                         }
                     }
                 }
@@ -265,7 +265,7 @@ where
 
         cp_with_names
             .iter()
-            .fold(Ok(()), |accum, &(ref path, ref name)| {
+            .fold(Ok(()), |accum, &(ref path, ref name, _)| {
                 accum.and_then(|_| {
                     fs::canonicalize(path).and_then(|path| {
                         let path_struct = path::Path::new(&path);
@@ -274,7 +274,7 @@ where
                             fs::File::open(path_struct)
                                 .and_then(|ref mut f| tar_builder.append_file(name, f))
                         } else if path_struct.is_dir() {
-                            tar_builder.append_dir_all(name, path.clone())
+                            tar_builder.append_dir_all(name, &path)
                         } else {
                             Ok(())
                         }
@@ -292,9 +292,9 @@ where
                             "Unable to acquire stream (was finish() called?)",
                         )),
 
-                        Some(ref mut stream) => read_pid_handler(stream).ok_or_else(||
-                            io::Error::new(io::ErrorKind::InvalidInput, "Unable to parse pid"),
-                        ),
+                        Some(ref mut stream) => read_pid_handler(stream).ok_or_else(|| {
+                            io::Error::new(io::ErrorKind::InvalidInput, "Unable to parse pid")
+                        }),
                     })
             })
     })
