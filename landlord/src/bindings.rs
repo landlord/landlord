@@ -26,20 +26,14 @@ where
                 // it will respond with three question marks (ASCII 63)
                 // otherwise we'll keep retrying
 
-                let question_mark: u8 = 63;
-
-                let result = s.write_all(&[question_mark])
+                let result = s.write_all(&[b'?'])
                     .and_then(|_| s.flush())
                     .and_then(|_| s.shutdown(net::Shutdown::Write));
 
                 if result.is_ok() {
                     if let Ok(bs) = read_bytes(&mut s, 3) {
-                        if bs.len() == 3
-                            && bs[0] == question_mark
-                            && bs[1] == question_mark
-                            && bs[2] == question_mark
-                        {
-                            break;
+                        if let [b'?', b'?', b'?'] = bs[..] {
+                            break
                         }
                     }
                 }
