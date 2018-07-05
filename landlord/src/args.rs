@@ -61,7 +61,7 @@ pub fn parse_java_opts<S: AsRef<str>>(opts: S) -> Vec<String> {
         }
     }
 
-    if arg.len() > 0 {
+    if !arg.is_empty() {
         args.push(arg);
     }
 
