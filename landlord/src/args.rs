@@ -50,7 +50,7 @@ pub fn parse_java_args<S: AsRef<str>>(args: &[S]) -> JavaArgs {
         let next = iter.next();
 
         match next {
-            Some(entry) if !entry.starts_with("-") => {
+            Some(entry) if !entry.starts_with('-') => {
                 let mut items = vec![];
 
                 while let Some(next) = iter.next() {
@@ -97,7 +97,7 @@ pub fn parse_java_args<S: AsRef<str>>(args: &[S]) -> JavaArgs {
 
             Some(flag) if flag == "-cp" || flag == "-classpath" => {
                 if let Some(cp) = iter.next() {
-                    jargs.cp = cp.split(":").map(|s| s.to_string()).collect();
+                    jargs.cp = cp.split(':').map(|s| s.to_string()).collect();
                 } else {
                     jargs
                         .errors
@@ -126,7 +126,7 @@ pub fn parse_java_args<S: AsRef<str>>(args: &[S]) -> JavaArgs {
 
             Some(flag) if flag.starts_with("-D") => {
                 if let Some(s) = flag.get(2..) {
-                    let parts: Vec<&str> = s.splitn(2, "=").collect();
+                    let parts: Vec<&str> = s.splitn(2, '=').collect();
 
                     if parts.len() == 2 {
                         jargs
