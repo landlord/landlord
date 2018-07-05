@@ -84,16 +84,16 @@ where
                 .and_then(|_| s.shutdown(net::Shutdown::Write))
         })
     };
-    let std_out = |bs: Vec<u8>| stdout.write_all(&bs);
-    let std_err = |bs: Vec<u8>| stderr.write_all(&bs);
+    let stdout = |bs: Vec<u8>| stdout.write_all(&bs);
+    let stderr = |bs: Vec<u8>| stderr.write_all(&bs);
 
     input_handler(
         pid,
         handler_reader,
         handler_writer,
         session_writer,
-        std_out,
-        std_err,
+        stdout,
+        stderr,
     )
 }
 

@@ -27,8 +27,8 @@ pub fn input_handler<R, W, SW, StdOut, StdErr>(
     mut reader: R,
     mut writer: W,
     mut single_session_writer: SW,
-    mut std_out: StdOut,
-    mut std_err: StdErr,
+    mut stdout: StdOut,
+    mut stderr: StdErr,
 ) -> io::Result<i32>
 where
     R: FnMut() -> io::Result<Input>,
@@ -80,13 +80,13 @@ where
             }
 
             Ok(Input::StdOut(b)) => {
-                if let Err(e) = std_out(b) {
+                if let Err(e) = stdout(b) {
                     return Err(e);
                 }
             }
 
             Ok(Input::StdErr(b)) => {
-                if let Err(e) = std_err(b) {
+                if let Err(e) = stderr(b) {
                     return Err(e);
                 }
             }
