@@ -33,7 +33,7 @@ where
                     .and_then(|_| s.shutdown(net::Shutdown::Write));
 
                 if result.is_ok() {
-                    if let Some(bs) = read_bytes(&mut s, 3).ok() {
+                    if let Ok(bs) = read_bytes(&mut s, 3) {
                         if bs.len() == 3
                             && bs[0] == question_mark
                             && bs[1] == question_mark
