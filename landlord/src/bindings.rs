@@ -293,12 +293,12 @@ where
                     .and_then(|_| tar_builder.into_inner())
                     .and_then(|ref mut stream| stream.finish())
                     .and_then(|ref mut stream| match stream {
-                        &mut None => Err(io::Error::new(
+                        None => Err(io::Error::new(
                             io::ErrorKind::InvalidInput,
                             "Unable to acquire stream (was finish() called?)",
                         )),
 
-                        &mut Some(ref mut stream) => read_pid_handler(stream).ok_or(
+                        Some(ref mut stream) => read_pid_handler(stream).ok_or(
                             io::Error::new(io::ErrorKind::InvalidInput, "Unable to parse pid"),
                         ),
                     })
