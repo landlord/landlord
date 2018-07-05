@@ -214,7 +214,7 @@ where
         .and_then(|size| reader(size as usize))
 }
 
-fn decode_i32(vec: &Vec<u8>) -> io::Result<i32> {
+fn decode_i32(vec: &[u8]) -> io::Result<i32> {
     io::Cursor::new(vec).read_i32::<BigEndian>()
 }
 
