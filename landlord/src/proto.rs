@@ -27,8 +27,8 @@ pub fn input_handler<R, W, SW, StdOut, StdErr>(
     mut reader: R,
     mut writer: W,
     mut single_session_writer: SW,
-    mut std_out: StdOut,
-    mut std_err: StdErr,
+    mut stdout: StdOut,
+    mut stderr: StdErr,
 ) -> io::Result<i32>
 where
     R: FnMut() -> io::Result<Input>,
@@ -43,7 +43,7 @@ where
                 return Ok(s);
             }
 
-            Ok(Input::Fail(e)) => {
+            Ok(Input::Fail(e)) | Err(e) => {
                 return Err(e);
             }
 
@@ -80,19 +80,15 @@ where
             }
 
             Ok(Input::StdOut(b)) => {
-                if let Err(e) = std_out(b) {
+                if let Err(e) = stdout(b) {
                     return Err(e);
                 }
             }
 
             Ok(Input::StdErr(b)) => {
-                if let Err(e) = std_err(b) {
+                if let Err(e) = stderr(b) {
                     return Err(e);
                 }
-            }
-
-            Err(e) => {
-                return Err(e);
             }
         }
     }
@@ -106,29 +102,25 @@ where
 {
     loop {
         match reader(1).map(|bs| bs[0]) {
-            Ok(101) => {
-                // UTF8 'e'
+            Ok(b'e') => {
                 let result = read_payload(&mut reader)
-                    .map(|p| Input::StdErr(p))
+                    .map(Input::StdErr)
                     .and_then(|msg| writer(msg));
 
                 if result.is_err() {
                     return result;
                 }
             }
-            Ok(111) => {
-                // UTF8 'o'
+            Ok(b'o') => {
                 let result = read_payload(&mut reader)
-                    .map(|p| Input::StdOut(p))
+                    .map(Input::StdOut)
                     .and_then(|msg| writer(msg));
 
                 if result.is_err() {
                     return result;
                 }
             }
-            Ok(120) => {
-                // UTF8 'x'
-
+            Ok(b'x') => {
                 return reader(4)
                     .and_then(|bs| decode_i32(&bs))
                     .and_then(|code| writer(Input::Exit(code)));
@@ -180,7 +172,7 @@ pub fn app_cmdline<S: AsRef<str>>(
             .join(":"),
         class.as_ref(),
         if args.is_empty() {
-            format!("")
+            "".to_string()
         } else {
             format!(
                 "\u{0000}{}",
@@ -214,7 +206,7 @@ where
         .and_then(|size| reader(size as usize))
 }
 
-fn decode_i32(vec: &Vec<u8>) -> io::Result<i32> {
+fn decode_i32(vec: &[u8]) -> io::Result<i32> {
     io::Cursor::new(vec).read_i32::<BigEndian>()
 }
 

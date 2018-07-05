@@ -8,11 +8,11 @@ use std::os::unix::net::UnixStream;
 use std::sync::mpsc::*;
 use std::{env, io, process, str, time};
 
-const CARGO_VERSION: &'static str = env!("CARGO_PKG_VERSION");
+const CARGO_VERSION: &str = env!("CARGO_PKG_VERSION");
 const RETRY_DELAY_MILLIS: u64 = 5000;
 const RELEASE_VERSION: Option<&'static str> = option_env!("RELEASE_VERSION");
 
-const USAGE: &'static str = "Usage: landlord [-options] class [args...]
+const USAGE: &str = "Usage: landlord [-options] class [args...]
            (to execute a class)
    or  landlord [-options] -jar jarfile [args...]
            (to execute a jar file)
@@ -133,7 +133,7 @@ where
                     spawn_and_handle_stdin(tx.clone());
                     spawn_and_handle_stream_read(stream, tx.clone());
 
-                    handle_events(pid, &mut stream_writer, rx, new_stream)
+                    handle_events(pid, &mut stream_writer, &rx, new_stream)
                 });
 
             let code = match result {

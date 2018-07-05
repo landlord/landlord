@@ -8,7 +8,7 @@ use std::sync::mpsc::*;
 use std::{fs, io, marker, net, path, process, thread, time};
 use tar::Builder;
 
-/// uses new_stream to open a connection to
+/// uses `new_stream` to open a connection to
 /// landlordd. if it fails in an unexpected manner,
 /// i.e. landlordd isn't ready yet, it retries
 /// after sleeping for some time.
@@ -26,20 +26,14 @@ where
                 // it will respond with three question marks (ASCII 63)
                 // otherwise we'll keep retrying
 
-                let question_mark: u8 = 63;
-
-                let result = s.write_all(&[question_mark])
+                let result = s.write_all(&[b'?'])
                     .and_then(|_| s.flush())
                     .and_then(|_| s.shutdown(net::Shutdown::Write));
 
                 if result.is_ok() {
-                    if let Some(bs) = read_bytes(&mut s, 3).ok() {
-                        if bs.len() == 3
-                            && bs[0] == question_mark
-                            && bs[1] == question_mark
-                            && bs[2] == question_mark
-                        {
-                            break;
+                    if let Ok(bs) = read_bytes(&mut s, 3) {
+                        if let [b'?', b'?', b'?'] = bs[..] {
+                            break
                         }
                     }
                 }
@@ -55,7 +49,7 @@ where
 pub fn handle_events<NewS, IO>(
     pid: i32,
     stream: &mut IO,
-    reader: Receiver<Input>,
+    reader: &Receiver<Input>,
     mut new_stream: NewS,
 ) -> io::Result<i32>
 where
@@ -84,16 +78,16 @@ where
                 .and_then(|_| s.shutdown(net::Shutdown::Write))
         })
     };
-    let std_out = |bs: Vec<u8>| stdout.write_all(&bs);
-    let std_err = |bs: Vec<u8>| stderr.write_all(&bs);
+    let stdout = |bs: Vec<u8>| stdout.write_all(&bs);
+    let stderr = |bs: Vec<u8>| stderr.write_all(&bs);
 
     input_handler(
         pid,
         handler_reader,
         handler_writer,
         session_writer,
-        std_out,
-        std_err,
+        stdout,
+        stderr,
     )
 }
 
@@ -221,7 +215,7 @@ pub fn spawn_and_handle_stdin(sender: Sender<Input>) {
 }
 
 /// Spawns a thread and reads data from the provided `stream`. The actual logic
-/// of how much to read is done via the read_handler function.
+/// of how much to read is done via the `read_handler` function.
 pub fn spawn_and_handle_stream_read<IO>(mut stream: IO, sender: Sender<Input>)
 where
     IO: IOStream + Read + Send + Write + 'static,
@@ -236,7 +230,7 @@ where
         };
 
         if let Err(read_error) = read_handler(r, m) {
-            eprintln!("landlord: read_hadler crashed, {:?}", read_error);
+            eprintln!("landlord: read_handler crashed, {:?}", read_error);
             process::exit(1);
         }
     });
@@ -293,12 +287,12 @@ where
                     .and_then(|_| tar_builder.into_inner())
                     .and_then(|ref mut stream| stream.finish())
                     .and_then(|ref mut stream| match stream {
-                        &mut None => Err(io::Error::new(
+                        None => Err(io::Error::new(
                             io::ErrorKind::InvalidInput,
                             "Unable to acquire stream (was finish() called?)",
                         )),
 
-                        &mut Some(ref mut stream) => read_pid_handler(stream).ok_or(
+                        Some(ref mut stream) => read_pid_handler(stream).ok_or_else(||
                             io::Error::new(io::ErrorKind::InvalidInput, "Unable to parse pid"),
                         ),
                     })
@@ -306,7 +300,7 @@ where
     })
 }
 
-/// BlockSizeWritter ensures that data written to a provided `stream`
+/// `BlockSizeWriter` ensures that data written to a provided `stream`
 /// is done in zero-padded blocks of the provided size. landlordd
 /// expects GNU-standard blocking factor of 20, so when writing tar
 /// data to it, `landlord` uses this wrapper with a `block_size` of
@@ -363,7 +357,7 @@ impl<W: Write> BlockSizeWriter<W> {
     }
 }
 
-/// Exposes underlying shutdown and try_clone functions
+/// Exposes underlying `shutdown` and `try_clone` functions
 /// for the types of host protocols we support, i.e. UDS and TCP.
 pub trait IOStream
 where
