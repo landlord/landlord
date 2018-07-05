@@ -109,7 +109,7 @@ where
             Ok(101) => {
                 // UTF8 'e'
                 let result = read_payload(&mut reader)
-                    .map(|p| Input::StdErr(p))
+                    .map(Input::StdErr)
                     .and_then(|msg| writer(msg));
 
                 if result.is_err() {
@@ -119,7 +119,7 @@ where
             Ok(111) => {
                 // UTF8 'o'
                 let result = read_payload(&mut reader)
-                    .map(|p| Input::StdOut(p))
+                    .map(Input::StdOut)
                     .and_then(|msg| writer(msg));
 
                 if result.is_err() {
