@@ -54,8 +54,10 @@ pub fn parse_java_opts<S: AsRef<str>>(opts: S) -> Vec<String> {
         } else if ch == '\\' {
             escaped = true;
         } else if ch == ' ' {
-            args.push(arg);
-            arg = String::new();
+            if !arg.is_empty() {
+                args.push(arg);
+                arg = String::new();
+            }
         } else {
             arg.push(ch);
         }
@@ -197,6 +199,10 @@ fn test_parse_java_opts() {
     assert_eq!(
         parse_java_opts("hello\\\\ trailing back slash"),
         vec!["hello\\", "trailing", "back", "slash"]
+    );
+    assert_eq!(
+        parse_java_opts("  hello   world  "),
+        vec!["hello", "world"]
     );
 }
 
