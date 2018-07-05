@@ -128,10 +128,8 @@ pub fn parse_java_args<S: AsRef<str>>(args: &[S]) -> JavaArgs {
                 if let Some(s) = flag.get(2..) {
                     let parts: Vec<&str> = s.splitn(2, '=').collect();
 
-                    if parts.len() == 2 {
-                        jargs
-                            .props
-                            .push((parts[0].to_string(), parts[1].to_string()));
+                    if let [key, value] = parts[..] {
+                        jargs.props.push((key.to_string(), value.to_string()))
                     }
                 }
             }
