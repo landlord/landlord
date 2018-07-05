@@ -35,6 +35,39 @@ fn default() -> JavaArgs {
     }
 }
 
+/// Parses a JAVA_OPTS value, which is a space-delimited list of arguments
+/// that can be provided as an environment variable. This often provides
+/// some flexibility in operations. Whitespace can be escaped with a \ if
+/// it should be part of the argument, i.e. "hello\ world" is a single
+/// argument.
+///
+/// This implies that empty string arguments cannot be passed via JAVA_OPTS.
+pub fn parse_java_opts<S: AsRef<str>>(opts: S) -> Vec<String> {
+    let mut arg = String::new();
+    let mut args = Vec::new();
+    let mut escaped = false;
+
+    for ch in opts.as_ref().chars() {
+        if escaped {
+            arg.push(ch);
+            escaped = false;
+        } else if ch == '\\' {
+            escaped = true;
+        } else if ch == ' ' {
+            args.push(arg);
+            arg = String::new();
+        } else {
+            arg.push(ch);
+        }
+    }
+
+    if arg.len() > 0 {
+        args.push(arg);
+    }
+
+    args
+}
+
 pub fn parse_java_args<S: AsRef<str>>(args: &[S]) -> JavaArgs {
     // We want to aim to be a drop-in replacement for java, so we have to roll our own arg parser
     // because DocOpt/Clap/et al don't have the required features to match the rather strange java
@@ -147,6 +180,24 @@ pub fn parse_java_args<S: AsRef<str>>(args: &[S]) -> JavaArgs {
             }
         }
     }
+}
+
+#[test]
+fn test_parse_java_opts() {
+    assert_eq!(parse_java_opts(""), Vec::<String>::new());
+    assert_eq!(parse_java_opts("one"), vec!["one"]);
+    assert_eq!(
+        parse_java_opts("one two three"),
+        vec!["one", "two", "three"]
+    );
+    assert_eq!(
+        parse_java_opts("hello\\ world two three"),
+        vec!["hello world", "two", "three"]
+    );
+    assert_eq!(
+        parse_java_opts("hello\\\\ trailing back slash"),
+        vec!["hello\\", "trailing", "back", "slash"]
+    );
 }
 
 #[test]

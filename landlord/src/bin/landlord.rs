@@ -9,6 +9,7 @@ use std::sync::mpsc::*;
 use std::{env, io, process, str, time};
 
 const CARGO_VERSION: &str = env!("CARGO_PKG_VERSION");
+const JAVA_OPTS: &str = "JAVA_OPTS";
 const RETRY_DELAY_MILLIS: u64 = 5000;
 const RELEASE_VERSION: Option<&'static str> = option_env!("RELEASE_VERSION");
 
@@ -29,8 +30,12 @@ where options include:
     -wait         if provided, wait until landlordd is ready before connecting";
 
 fn main() {
-    let args: Vec<String> = env::args().collect();
-    let parsed = parse_java_args(&args[1..]);
+    let args: Vec<String> = [
+        env::var(JAVA_OPTS).map(parse_java_opts).unwrap_or_default(),
+        env::args().skip(1).collect(),
+    ].concat();
+
+    let parsed = parse_java_args(&args);
 
     if parsed.version {
         let version = RELEASE_VERSION.unwrap_or_else(|| CARGO_VERSION);
