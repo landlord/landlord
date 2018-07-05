@@ -298,7 +298,7 @@ where
                             "Unable to acquire stream (was finish() called?)",
                         )),
 
-                        Some(ref mut stream) => read_pid_handler(stream).ok_or(
+                        Some(ref mut stream) => read_pid_handler(stream).ok_or_else(||
                             io::Error::new(io::ErrorKind::InvalidInput, "Unable to parse pid"),
                         ),
                     })
