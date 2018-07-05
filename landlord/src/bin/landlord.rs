@@ -133,7 +133,7 @@ where
                     spawn_and_handle_stdin(tx.clone());
                     spawn_and_handle_stream_read(stream, tx.clone());
 
-                    handle_events(pid, &mut stream_writer, rx, new_stream)
+                    handle_events(pid, &mut stream_writer, &rx, new_stream)
                 });
 
             let code = match result {

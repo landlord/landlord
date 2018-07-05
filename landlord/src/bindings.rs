@@ -55,7 +55,7 @@ where
 pub fn handle_events<NewS, IO>(
     pid: i32,
     stream: &mut IO,
-    reader: Receiver<Input>,
+    reader: &Receiver<Input>,
     mut new_stream: NewS,
 ) -> io::Result<i32>
 where
