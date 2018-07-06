@@ -147,7 +147,7 @@ pub fn read_pid_handler(stream: &mut Read) -> Option<i32> {
 
 /// Creates the first line of data that is sent to landlordd when loading an app.
 pub fn app_cmdline<S: AsRef<str>>(
-    class_path_with_names: &[(String, String)],
+    class_path_with_names: &[(String, String, String)],
     props: &[(S, S)],
     class: &S,
     args: &[S],
@@ -167,7 +167,7 @@ pub fn app_cmdline<S: AsRef<str>>(
         },
         class_path_with_names
             .iter()
-            .map(|&(_, ref name)| name.as_ref())
+            .map(|&(_, _, ref cp_name)| cp_name.as_ref())
             .collect::<Vec<&str>>()
             .join(":"),
         class.as_ref(),
@@ -186,12 +186,24 @@ pub fn app_cmdline<S: AsRef<str>>(
 }
 
 /// Given class path entries, returns a new vector containing entries
-/// as a tuple, each element: (path, name to store in tar file)
-pub fn class_path_with_names<S: AsRef<str>>(class_path: &[S]) -> Vec<(String, String)> {
+/// as a tuple, each element: (path, name to store in tar file, name for classpath argument)
+pub fn class_path_with_names<S: AsRef<str>>(class_path: &[S]) -> Vec<(String, String, String)> {
     class_path
         .iter()
         .enumerate()
-        .map(|(ref i, e)| (e.as_ref().to_string(), i.to_string()))
+        .map(|(ref i, e)| {
+            let e = e.as_ref();
+
+            if e.ends_with('*') {
+                (
+                    e[..e.len() - 1].trim_right_matches('/').to_string(),
+                    i.to_string(),
+                    format!("{}/*", i.to_string()),
+                )
+            } else {
+                (e.to_string(), i.to_string(), i.to_string())
+            }
+        })
         .collect()
 }
 
@@ -221,14 +233,19 @@ fn test_app_cmdline_no_args() {
     assert_eq!(
         app_cmdline(
             &[
-                ("/test1/one".to_string(), "0".to_string()),
-                ("/test1/two".to_string(), "1".to_string()),
+                ("/test1/one".to_string(), "0".to_string(), "0".to_string()),
+                ("/test1/two".to_string(), "1".to_string(), "1".to_string()),
+                (
+                    "/test1/three".to_string(),
+                    "2".to_string(),
+                    "2/*".to_string()
+                ),
             ],
             &[],
             &"com.example.HelloWorld1",
             &[]
         ),
-        "l-cp\u{0000}0:1\u{0000}com.example.HelloWorld1\n".to_string()
+        "l-cp\u{0000}0:1:2/*\u{0000}com.example.HelloWorld1\n".to_string()
     )
 }
 
@@ -237,8 +254,8 @@ fn test_app_cmdline_with_args() {
     assert_eq!(
         app_cmdline(
             &[
-                ("/test2/one".to_string(), "0".to_string()),
-                ("/test2/two".to_string(), "1".to_string()),
+                ("/test2/one".to_string(), "0".to_string(), "0".to_string()),
+                ("/test2/two".to_string(), "1".to_string(), "1".to_string()),
             ],
             &[],
             &"com.example.HelloWorld2",
@@ -253,8 +270,8 @@ fn test_app_cmdline_with_args_props() {
     assert_eq!(
         app_cmdline(
             &[
-                ("/test2/one".to_string(), "0".to_string()),
-                ("/test2/two".to_string(), "1".to_string()),
+                ("/test2/one".to_string(), "0".to_string(), "0".to_string()),
+                ("/test2/two".to_string(), "1".to_string(), "1".to_string()),
             ],
             &[("one", "#1!"), ("two", "#2!")],
             &"com.example.HelloWorld2",
@@ -268,10 +285,15 @@ fn test_app_cmdline_with_args_props() {
 #[test]
 fn test_class_path_with_names() {
     assert_eq!(
-        class_path_with_names(&["/test/one", "/test/two"]),
+        class_path_with_names(&["/test/one", "/test/two", "/test/three/*"]),
         vec![
-            ("/test/one".to_string(), "0".to_string()),
-            ("/test/two".to_string(), "1".to_string()),
+            ("/test/one".to_string(), "0".to_string(), "0".to_string()),
+            ("/test/two".to_string(), "1".to_string(), "1".to_string()),
+            (
+                "/test/three".to_string(),
+                "2".to_string(),
+                "2/*".to_string(),
+            ),
         ]
     );
 }
