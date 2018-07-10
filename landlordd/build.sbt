@@ -52,13 +52,23 @@ lazy val daemon = project
     packageName in Docker := "landlordd",
     dockerUsername := Some("landlord"),
     dockerCommands := dockerCommands.value.flatMap {
+      case cmd @ Cmd("ADD", _) => Seq(
+        cmd,
+        Cmd(
+          "RUN",
+          s"""|chmod -R g+x /opt/docker/bin && \\
+              |chmod -R g+w /opt/docker
+           """.stripMargin)
+
+      )
       case cmd @ Cmd("WORKDIR", _) => Seq(
         cmd,
         Cmd(
           "RUN",
           s"""|apk add --no-cache shadow && \\
               |mkdir -p /var/run/landlord && \\
-              |chown ${daemonUser.value} /var/run/landlord && \\
+              |chown ${daemonUser.value}:${daemonGroup.value} /var/run/landlord && \\
+              |chmod 770 /var/run/landlord && \\
               |usermod -d /var/run/landlord ${daemonUser.value}
               |""".stripMargin)
       )
