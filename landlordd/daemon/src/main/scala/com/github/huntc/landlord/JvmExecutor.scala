@@ -2,15 +2,15 @@ package com.github.huntc.landlord
 
 import akka.NotUsed
 import akka.actor.{ Actor, ActorLogging, Props, Timers }
-import akka.pattern.pipe
 import akka.util.ByteString
 import akka.stream._
 import akka.stream.scaladsl.{ BroadcastHub, Keep, Source, StreamConverters }
-import java.io.{ ByteArrayOutputStream, PrintStream }
+import java.io.{ ByteArrayOutputStream, File, IOException, PrintStream }
 import java.lang.reflect.InvocationTargetException
 import java.net.URLClassLoader
 import java.nio.ByteOrder
-import java.nio.file.{ Files, Path, Paths }
+import java.nio.file.attribute.BasicFileAttributes
+import java.nio.file._
 import java.security.Permission
 import java.util.Properties
 import java.util.concurrent.atomic.AtomicBoolean
@@ -199,6 +199,30 @@ object JvmExecutor {
     "user.home",
     "user.dir"
   )
+
+  // Inspired by https://gist.github.com/polymorphic/6894163
+  private[landlord] def deleteFiles(path: Path): Unit =
+    try {
+      if (Files.exists(path) && Files.isDirectory(path)) {
+        Files.walkFileTree(path, new FileVisitor[Path] {
+          def visitFileFailed(file: Path, exc: IOException) = FileVisitResult.CONTINUE
+
+          def visitFile(file: Path, attrs: BasicFileAttributes): FileVisitResult = {
+            Files.delete(file)
+            FileVisitResult.CONTINUE
+          }
+
+          def preVisitDirectory(dir: Path, attrs: BasicFileAttributes) = FileVisitResult.CONTINUE
+
+          def postVisitDirectory(dir: Path, exc: IOException): FileVisitResult = {
+            Files.delete(dir)
+            FileVisitResult.CONTINUE
+          }
+        })
+      }
+    } catch {
+      case NonFatal(_) =>
+    }
 }
 
 /**
@@ -238,6 +262,8 @@ class JvmExecutor(
   implicit val mat: ActorMaterializer = ActorMaterializer()
   import context.dispatcher
 
+  val blockingDispatcher = context.system.dispatchers.lookup("akka.actor.default-blocking-io-dispatcher")
+
   log.debug("Process actor starting for {}", processId)
   in
     .via(new ProcessParameterParser)
@@ -245,11 +271,14 @@ class JvmExecutor(
       case (_, ProcessParameterParser.CommandLine(value)) =>
         Future.successful(value)
       case (cl, ProcessParameterParser.Archive(value)) =>
-        TarStreamWriter
-          .writeTarStream(
-            value,
-            processDirPath,
-            context.system.dispatchers.lookup("akka.actor.default-blocking-io-dispatcher")
+        Future(deleteFiles(processDirPath))(blockingDispatcher)
+          .flatMap(_ =>
+            TarStreamWriter
+              .writeTarStream(
+                value,
+                processDirPath,
+                blockingDispatcher
+              )
           )
           .map(_ => cl)
       case (cl, ProcessParameterParser.Stdin(value)) =>
@@ -580,6 +609,8 @@ class JvmExecutor(
       context.stop(self)
   }
 
-  override def postStop(): Unit =
-    log.debug("Process actor stopped for {}", processId)
+  override def postStop(): Unit = {
+    log.debug("Process actor stopped for {} - removing its working dir at {}", processId, processDirPath)
+    Future(deleteFiles(processDirPath))(blockingDispatcher)
+  }
 }
