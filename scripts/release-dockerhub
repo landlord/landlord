@@ -10,7 +10,7 @@ if [ "$DOCKER_USERNAME" = "" ] || [ "$DOCKER_PASSWORD" = "" ]; then
   exit 3
 fi
 
-version=$(git name-rev --name-only HEAD | sed 's/^tags\/v//')
+version=$(git name-rev --name-only HEAD | sed -E 's/^tags\/v(.*)\^0/\1/')
 
 # Normalize dirs
 SCRIPT_NAME="${BASH_SOURCE[0]}"
