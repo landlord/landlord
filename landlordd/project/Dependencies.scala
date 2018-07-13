@@ -2,7 +2,7 @@ import sbt._
 import sbt.Resolver.bintrayRepo
 
 object Versions {
-  lazy val akka = "2.5.12"
+  lazy val akka = "2.5.14"
   lazy val alpakka = "0.20"
   lazy val commonsCompress = "1.16.1"
   lazy val logbackClassic = "1.2.3"
