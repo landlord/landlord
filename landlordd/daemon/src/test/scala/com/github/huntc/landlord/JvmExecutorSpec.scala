@@ -11,12 +11,13 @@ import java.nio.file.{ Files, Paths }
 
 import org.apache.commons.compress.archivers.tar.{ TarArchiveEntry, TarArchiveOutputStream }
 import org.scalatest._
+import org.scalatest.concurrent.Eventually
 
 import scala.concurrent.{ ExecutionContext, Promise }
 import scala.concurrent.duration._
 
 class JvmExecutorSpec extends TestKit(ActorSystem("JvmExecutorSpec"))
-  with AsyncWordSpecLike with Matchers with BeforeAndAfterAll {
+  with AsyncWordSpecLike with Matchers with BeforeAndAfterAll with Eventually {
 
   override def afterAll: Unit = {
     TestKit.shutdownActorSystem(system)
@@ -158,6 +159,8 @@ class JvmExecutorSpec extends TestKit(ActorSystem("JvmExecutorSpec"))
       val watcher = TestProbe()
       watcher.watch(process)
       watcher.expectTerminated(process, max = 10.seconds.dilated)
+
+      eventually(assert(!processDirPath.toFile.exists()))
 
       outputOk
     }
