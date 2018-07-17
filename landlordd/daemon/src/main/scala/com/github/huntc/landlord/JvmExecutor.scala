@@ -5,7 +5,7 @@ import akka.actor.{ Actor, ActorLogging, Props, Timers }
 import akka.util.ByteString
 import akka.stream._
 import akka.stream.scaladsl.{ BroadcastHub, Keep, Source, StreamConverters }
-import java.io.{ ByteArrayOutputStream, File, IOException, PrintStream }
+import java.io.{ ByteArrayOutputStream, IOException, PrintStream }
 import java.lang.reflect.InvocationTargetException
 import java.net.URLClassLoader
 import java.nio.ByteOrder
@@ -133,41 +133,44 @@ object JvmExecutor {
    * `IllegalStateException` is thrown.
    */
   private[landlord] def removeShutdownHooks(group: ThreadGroup): Set[Thread] = {
-    val applicationShutdownHooksClass = Class.forName("java.lang.ApplicationShutdownHooks")
-    // We synchronize on the class as per OpenJDK
-    applicationShutdownHooksClass.synchronized {
-      var hooks: Set[Thread] = null
+    val hooks = try {
+      val applicationShutdownHooksClass = Class.forName("java.lang.ApplicationShutdownHooks")
+      // We synchronize on the class as per OpenJDK
+      applicationShutdownHooksClass.synchronized {
+        try {
+          val hooksField = applicationShutdownHooksClass.getDeclaredField("hooks")
 
-      try {
-        val hooksField = applicationShutdownHooksClass.getDeclaredField("hooks")
+          hooksField.setAccessible(true)
 
-        hooksField.setAccessible(true)
+          val allHooks = hooksField.get(null)
 
-        val allHooks = hooksField.get(null)
-
-        if (allHooks != null) {
-          hooks = allHooks
-            .asInstanceOf[java.util.IdentityHashMap[Thread, Thread]]
-            .keySet
-            .asScala
-            .filter(t => memberOfThreadGroup(t.getThreadGroup, group))
-            .toSet
+          if (allHooks != null) {
+            allHooks
+              .asInstanceOf[java.util.IdentityHashMap[Thread, Thread]]
+              .keySet
+              .asScala
+              .filter(t => memberOfThreadGroup(t.getThreadGroup, group))
+              .toSet
+          } else {
+            throw new IllegalStateException("Could find the java.lang.ApplicationShutdownHooks.fields")
+          }
+        } catch {
+          case _: NoSuchFieldException | _: ClassCastException | _: IllegalAccessException | _: IllegalArgumentException | _: ExceptionInInitializerError =>
+            throw new IllegalStateException("Could not access java.lang.ApplicationShutdownHooks.fields")
         }
-      } catch {
-        case _: NoSuchFieldException | _: ClassCastException | _: IllegalAccessException | _: IllegalArgumentException | _: ExceptionInInitializerError =>
-        // we ignore any expected reflection related exceptions as we'll throw our own IllegalStateException below
-        // other exception types are unexpected and thus will be thrown
       }
-
-      if (hooks == null)
-        throw new IllegalStateException("Could not access java.lang.ApplicationShutdownHooks.fields")
-
-      hooks.foreach { hook =>
-        Runtime.getRuntime.removeShutdownHook(hook)
-      }
-
-      hooks
+    } catch {
+      case _: ClassNotFoundException | _: ExceptionInInitializerError | _: LinkageError =>
+        throw new IllegalStateException("Could not access java.lang.ApplicationShutdownHooks")
     }
+
+    try {
+      hooks.foreach(Runtime.getRuntime.removeShutdownHook)
+    } catch {
+      case _: IllegalStateException => // This means that the JVM is already shutting down according to the API
+    }
+
+    hooks
   }
 
   // From https://docs.oracle.com/javase/8/docs/api/java/lang/System.html#getProperties--
@@ -264,7 +267,7 @@ class JvmExecutor(
   implicit val mat: ActorMaterializer = ActorMaterializer()
   import context.dispatcher
 
-  val blockingDispatcher = context.system.dispatchers.lookup("akka.actor.default-blocking-io-dispatcher")
+  private val blockingDispatcher = context.system.dispatchers.lookup("akka.actor.default-blocking-io-dispatcher")
 
   log.debug("Process actor starting for {}", processId)
   in
