@@ -133,39 +133,41 @@ object JvmExecutor {
    * `IllegalStateException` is thrown.
    */
   private[landlord] def removeShutdownHooks(group: ThreadGroup): Set[Thread] = {
-    var hooks: Set[Thread] = null
+    val applicationShutdownHooksClass = Class.forName("java.lang.ApplicationShutdownHooks")
+    // We synchronize on the class as per OpenJDK
+    applicationShutdownHooksClass.synchronized {
+      var hooks: Set[Thread] = null
 
-    try {
-      val hooksField = Class
-        .forName("java.lang.ApplicationShutdownHooks")
-        .getDeclaredField("hooks")
+      try {
+        val hooksField = applicationShutdownHooksClass.getDeclaredField("hooks")
 
-      hooksField.setAccessible(true)
+        hooksField.setAccessible(true)
 
-      val allHooks = hooksField.get(null)
+        val allHooks = hooksField.get(null)
 
-      if (allHooks != null) {
-        hooks = allHooks
-          .asInstanceOf[java.util.IdentityHashMap[Thread, Thread]]
-          .keySet
-          .asScala
-          .filter(t => memberOfThreadGroup(t.getThreadGroup, group))
-          .toSet
+        if (allHooks != null) {
+          hooks = allHooks
+            .asInstanceOf[java.util.IdentityHashMap[Thread, Thread]]
+            .keySet
+            .asScala
+            .filter(t => memberOfThreadGroup(t.getThreadGroup, group))
+            .toSet
+        }
+      } catch {
+        case _: NoSuchFieldException | _: ClassCastException | _: IllegalAccessException | _: IllegalArgumentException | _: ExceptionInInitializerError =>
+        // we ignore any expected reflection related exceptions as we'll throw our own IllegalStateException below
+        // other exception types are unexpected and thus will be thrown
       }
-    } catch {
-      case _: NoSuchFieldException | _: ClassCastException | _: IllegalAccessException | _: IllegalArgumentException | _: ExceptionInInitializerError =>
-      // we ignore any expected reflection related exceptions as we'll throw our own IllegalStateException below
-      // other exception types are unexpected and thus will be thrown
+
+      if (hooks == null)
+        throw new IllegalStateException("Could not access java.lang.ApplicationShutdownHooks.fields")
+
+      hooks.foreach { hook =>
+        Runtime.getRuntime.removeShutdownHook(hook)
+      }
+
+      hooks
     }
-
-    if (hooks == null)
-      throw new IllegalStateException("Could not access java.lang.ApplicationShutdownHooks.fields")
-
-    hooks.foreach { hook =>
-      Runtime.getRuntime.removeShutdownHook(hook)
-    }
-
-    hooks
   }
 
   // From https://docs.oracle.com/javase/8/docs/api/java/lang/System.html#getProperties--
