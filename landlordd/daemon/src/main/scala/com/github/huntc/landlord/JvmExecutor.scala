@@ -152,7 +152,7 @@ object JvmExecutor {
               .filter(t => memberOfThreadGroup(t.getThreadGroup, group))
               .toSet
           } else {
-            throw new IllegalStateException("Could find the java.lang.ApplicationShutdownHooks.fields")
+            throw new IllegalStateException("Could not find the java.lang.ApplicationShutdownHooks.fields")
           }
         } catch {
           case _: NoSuchFieldException | _: ClassCastException | _: IllegalAccessException | _: IllegalArgumentException | _: ExceptionInInitializerError =>
