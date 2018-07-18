@@ -65,7 +65,7 @@ lazy val daemon = project
         cmd,
         Cmd(
           "RUN",
-          s"""|apk add --no-cache shadow && \\
+          s"""|apk add --no-cache dumb-init shadow && \\
               |mkdir -p /var/run/landlord && \\
               |chown ${daemonUser.value}:${daemonGroup.value} /var/run/landlord && \\
               |chmod 770 /var/run/landlord && \\
@@ -75,6 +75,7 @@ lazy val daemon = project
       case cmd => Seq(cmd)
     },
     dockerBaseImage := "openjdk:8-jre-alpine",
+    dockerEntrypoint := Seq("/usr/bin/dumb-init", "--single-child", "--") ++ dockerEntrypoint.value,
     bashScriptExtraDefines ++= Seq(
       // Configuration for when running in a container
       """addJava "-XX:+UnlockExperimentalVMOptions"""",
