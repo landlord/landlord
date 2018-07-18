@@ -23,7 +23,7 @@ object Main extends App {
 
   case class Config(
       hosts: Seq[URI] = List.empty,
-      exitTimeout: FiniteDuration = 12.seconds,
+      exitTimeout: FiniteDuration = 8.seconds,
       exposedProps: Seq[String] = List.empty,
       heartbeatInterval: FiniteDuration = 1.second,
       outputDrainTimeAtExit: FiniteDuration = 100.milliseconds,
@@ -121,29 +121,28 @@ object Main extends App {
     import JvmExecutorReaper._
 
     override def receive: Receive =
-      registering(List.empty)
+      registering(Set.empty, Set.empty)
 
-    private def registering(actors: List[ActorRef]): Receive = {
+    private def registering(actors: Set[ActorRef], replyTo: Set[ActorRef]): Receive = {
       case Register(actor) =>
-        context.become(registering(context.watch(actor) +: actors))
+        context.become(next(actors + context.watch(actor), replyTo))
+
       case Terminated(actor) =>
-        context.become(registering(actors.filterNot(_ == actor)))
-      case Shutdown if actors.isEmpty =>
-        sender() ! Done
+        context.become(next(actors - actor, replyTo))
+
       case Shutdown =>
         actors.foreach(_ ! JvmExecutor.SignalProcess(JvmExecutor.SIGTERM))
-        context.become(shuttingDown(actors, sender()))
+        context.become(next(actors, replyTo + sender()))
     }
 
-    private def shuttingDown(actors: List[ActorRef], replyTo: ActorRef): Receive = {
-      case Register(actor) =>
-        actors.foreach(_ ! JvmExecutor.SignalProcess(JvmExecutor.SIGTERM))
-        context.become(registering(context.watch(actor) +: actors))
-      case _: Terminated if actors.lengthCompare(1) == 0 =>
-        replyTo ! Done
-      case Terminated(actor) =>
-        context.become(registering(actors.filterNot(_ == actor)))
-      case Shutdown =>
+    private def next(actors: Set[ActorRef], replyTo: Set[ActorRef]): Receive = {
+      if (actors.isEmpty) {
+        replyTo.foreach(_ ! Done)
+
+        registering(Set.empty, Set.empty)
+      } else {
+        registering(actors, replyTo)
+      }
     }
   }
 

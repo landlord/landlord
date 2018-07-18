@@ -99,6 +99,12 @@ object JvmExecutor {
 
   private[landlord] val ShutdownHooksPerm = new RuntimePermission("shutdownHooks")
 
+  private[landlord] val jvmShuttingDown = new AtomicBoolean(false)
+
+  sys.addShutdownHook {
+    jvmShuttingDown.set(true)
+  }
+
   private[landlord] case class ExitException(status: Int) extends SecurityException
 
   /**
@@ -339,6 +345,8 @@ class JvmExecutor(
                 case ClassExecutionMode(c, a) => c -> a
               }
 
+            log.debug("Process {} will execute class {}", processId, clsName)
+
             val cls = classLoader.loadClass(clsName)
             val meth = cls.getMethod("main", classOf[Array[String]])
 
@@ -358,6 +366,10 @@ class JvmExecutor(
                             ite.printStackTrace(stderr.fallback)
                             stderr.println("Something went wrong - see Landlord's log")
                             Some(70) // EXIT_SOFTWARE, Internal Software Error as defined in BSD sysexits.h
+                          case _: InterruptedException if stopInProgress.get =>
+                            // Expected when we're shutting down as we explicitly invoke interrupt()
+                            // on threads
+                            None
                           case otherCause =>
                             val msg = s"An uncaught error for process $processId. Stacktrace follows. The process will continue to run unless System.exit is called."
                             stderr.fallback.println(msg)
@@ -368,6 +380,10 @@ class JvmExecutor(
                         }
                       case ExitException(s) =>
                         Some(s) // It is normal for this exception to occur given that we want the process to explicitly exit
+                      case _: InterruptedException if stopInProgress.get =>
+                        // Expected when we're shutting down as we explicitly invoke interrupt()
+                        // on threads
+                        None
                       case otherException =>
                         stderr.fallback.println(s"An internal error has occurred within landlord given process $processId. Stacktrace follows.")
                         otherException.printStackTrace(stderr.fallback)
@@ -402,7 +418,11 @@ class JvmExecutor(
                             }
                           } catch {
                             case _: IllegalStateException =>
-                              log.warning("Unable to access shutdown hooks; they will not be run until the JVM exits")
+                              if (jvmShuttingDown.get()) {
+                                log.debug("Unable to access shutdown hooks because the JVM is shutting down")
+                              } else {
+                                log.warning("Unable to access shutdown hooks; they will not be run until the JVM exits")
+                              }
                           }
 
                           // A couple notes on threads:
