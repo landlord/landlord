@@ -11,13 +11,25 @@ use tar::Builder;
 /// uses `new_stream` to open a connection to
 /// landlordd. if it fails in an unexpected manner,
 /// i.e. landlordd isn't ready yet, it retries
-/// after sleeping for some time.
-pub fn wait_until_ready<NewS, IO>(new_stream: &mut NewS, sleep_time: time::Duration) -> ()
+/// after sleeping for some time. If a SIGINT, SIGTERM, or
+/// SIGQUIT is received while waiting, an exit code will be
+/// returned.
+pub fn wait_until_ready<NewS, IO>(
+    new_stream: &mut NewS,
+    reader: &Receiver<Input>,
+    sleep_time: time::Duration,
+) -> Option<i32>
 where
     NewS: FnMut() -> io::Result<IO>,
     IO: IOStream + Read + Write,
 {
     loop {
+        while let Some(Input::Signal(s)) = reader.try_recv().ok() {
+            if s == libc::SIGINT || s == libc::SIGTERM || s == libc::SIGQUIT {
+                return Some(128 + s);
+            }
+        }
+
         match new_stream() {
             Err(_) => {}
 
@@ -33,7 +45,7 @@ where
                 if result.is_ok() {
                     if let Ok(bs) = read_bytes(&mut s, 3) {
                         if let [b'?', b'?', b'?'] = bs[..] {
-                            break;
+                            return None;
                         }
                     }
                 }
