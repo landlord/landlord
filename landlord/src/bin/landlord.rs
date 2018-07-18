@@ -10,7 +10,7 @@ use std::{env, io, process, str, time};
 
 const CARGO_VERSION: &str = env!("CARGO_PKG_VERSION");
 const JAVA_OPTS: &str = "JAVA_OPTS";
-const RETRY_DELAY_MILLIS: u64 = 5000;
+const RETRY_DELAY_MILLIS: u64 = 1000;
 const RELEASE_VERSION: Option<&'static str> = option_env!("RELEASE_VERSION");
 
 const USAGE: &str = "Usage: landlord [-options] class [args...]
@@ -114,11 +114,18 @@ where
     NewS: FnMut() -> io::Result<IO>,
     S: AsRef<str>,
 {
+    let (tx, rx) = channel();
+
+    spawn_and_handle_signals(tx.clone());
+
     if wait {
-        wait_until_ready(
+        if let Some(code) = wait_until_ready(
             &mut new_stream,
+            &rx,
             time::Duration::from_millis(RETRY_DELAY_MILLIS),
-        )
+        ) {
+            process::exit(code);
+        }
     }
 
     match new_stream() {
@@ -129,12 +136,9 @@ where
         }
 
         Ok(mut stream) => {
-            let (tx, rx) = channel();
-
             let result = install_fs_and_start(cp, props, class, args, &mut stream)
                 .and_then(|pid| stream.try_clone().map(|stream_writer| (pid, stream_writer)))
                 .and_then(|(pid, mut stream_writer)| {
-                    spawn_and_handle_signals(tx.clone());
                     spawn_and_handle_stdin(tx.clone());
                     spawn_and_handle_stream_read(stream, tx.clone());
 

@@ -200,10 +200,7 @@ fn test_parse_java_opts() {
         parse_java_opts("hello\\\\ trailing back slash"),
         vec!["hello\\", "trailing", "back", "slash"]
     );
-    assert_eq!(
-        parse_java_opts("  hello   world  "),
-        vec!["hello", "world"]
-    );
+    assert_eq!(parse_java_opts("  hello   world  "), vec!["hello", "world"]);
 }
 
 #[test]
