@@ -92,6 +92,14 @@ lazy val test = project
     name := "test"
   )
 
+lazy val benchmarks = project
+  .in(file("benchmarks"))
+  .enablePlugins(JmhPlugin)
+  .settings(
+    name := "benchmarks"
+  )
+  .dependsOn(daemon)
+
 lazy val landlordd = project
   .in(file("."))
   .settings(
