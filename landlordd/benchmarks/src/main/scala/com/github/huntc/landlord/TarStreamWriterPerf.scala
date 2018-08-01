@@ -14,6 +14,15 @@ import org.openjdk.jmh.annotations._
 import scala.concurrent.Await
 import scala.concurrent.duration._
 
+object TarStreamWriterPerf {
+  /*
+   * An entry point for debugging purposes - invoke whatever you need to debug
+   */
+  def main(args: Array[String]): Unit = {
+    new TarStreamWriterPerf().setup()
+  }
+}
+
 @State(Scope.Benchmark)
 class TarStreamWriterPerf {
 
@@ -32,7 +41,11 @@ class TarStreamWriterPerf {
         .createArchiveOutputStream(ArchiveStreamFactory.TAR, bos)
         .asInstanceOf[TarArchiveOutputStream]
     try {
-      for (i <- 0 until 3000) {
+      // We create a tar file of about 100MB, equating roughly
+      // to 10000 classes of 10k in size, which seems reasonable
+      // when looking at some of our existing tars from production.
+      val data = Array.fill(10000)('a'.toByte)
+      for (i <- 0 until 10000) {
         {
           val te = new TarArchiveEntry(s"dir$i/")
           tos.putArchiveEntry(te)
@@ -40,7 +53,6 @@ class TarStreamWriterPerf {
         }
         {
           val te = new TarArchiveEntry(s"dir$i/foo")
-          val data = "some-content".getBytes("UTF-8")
           te.setSize(data.length.toLong)
           tos.putArchiveEntry(te)
           tos.write(data)
