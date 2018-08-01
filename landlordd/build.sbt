@@ -7,7 +7,6 @@ import Dependencies._
 lazy val daemon = project
   .in(file("daemon"))
   .settings(
-    name := "daemon",
     libraryDependencies ++= Seq(
       akkaStream,
       akkSlf4j,
@@ -88,16 +87,10 @@ lazy val daemon = project
 
 lazy val test = project
   .in(file("test"))
-  .settings(
-    name := "test"
-  )
 
 lazy val benchmarks = project
   .in(file("benchmarks"))
   .enablePlugins(JmhPlugin)
-  .settings(
-    name := "benchmarks"
-  )
   .dependsOn(daemon)
 
 lazy val landlordd = project
