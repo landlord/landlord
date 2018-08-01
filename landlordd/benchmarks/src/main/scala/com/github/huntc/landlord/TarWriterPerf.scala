@@ -14,17 +14,17 @@ import org.openjdk.jmh.annotations._
 import scala.concurrent.Await
 import scala.concurrent.duration._
 
-object TarStreamWriterPerf {
+object TarWriterPerf {
   /*
    * An entry point for debugging purposes - invoke whatever you need to debug
    */
   def main(args: Array[String]): Unit = {
-    new TarStreamWriterPerf().setup()
+    new UnixDomainSocketPerf().setup()
   }
 }
 
 @State(Scope.Benchmark)
-class TarStreamWriterPerf {
+class TarWriterPerf {
 
   private var bytesSource = Source.empty[ByteString]
 
@@ -72,7 +72,7 @@ class TarStreamWriterPerf {
   }
 
   @Benchmark
-  def testWriter(): Unit = {
+  def testTarWriter(): Unit = {
     val blockingEc = scala.concurrent.ExecutionContext.Implicits.global
     Await.result(TarStreamWriter.writeTarStream(bytesSource, rootPath, blockingEc), 10.seconds)
   }
