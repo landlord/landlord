@@ -1,6 +1,5 @@
 package com.github.huntc.landlord
 
-import java.nio.ByteOrder
 import java.util.concurrent.atomic.AtomicBoolean
 
 import akka.stream._

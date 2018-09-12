@@ -24,9 +24,7 @@ object UnixDomainSocketPerf {
   }
 
   val serverFlow: Flow[ByteString, ByteString, NotUsed] =
-    Flow.apply[ByteString]
-      .dropWhile(_ => true)
-      .map(_ => ByteString.empty)
+    Flow[ByteString].dropWhile(_ => true)
 }
 
 @State(Scope.Benchmark)
