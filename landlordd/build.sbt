@@ -57,7 +57,9 @@ lazy val daemon = project
         Cmd(
           "RUN",
           s"""|chmod -R g+x /opt/docker/bin && \\
-              |chmod -R g+w /opt/docker
+              |chmod -R g+w /opt/docker && \\
+              |chown :${daemonGroup.value} /etc/ssl/certs/java/cacerts && \\
+              |chmod -R g+w /etc/ssl/certs/java/cacerts
            """.stripMargin)
 
       )
