@@ -28,7 +28,8 @@ export RELEASE_VERSION=$version
   cargo clean && \
   cargo test --target=x86_64-unknown-linux-musl --release && \
   cargo build --target=x86_64-unknown-linux-musl --release && \
-  docker build --no-cache -t "landlord/landlord:$version" .)
+  docker build -f docker/landlord/Dockerfile --no-cache -t "landlord/landlord:$version" . && \
+  docker build -f docker/landlord-alpine/Dockerfile --no-cache -t "landlord/landlord-alpine:$version" .)
 
 (cd landlordd && \
   sbt clean daemon/docker:publishLocal)
@@ -37,3 +38,4 @@ export RELEASE_VERSION=$version
 echo "$DOCKER_PASSWORD" | docker login -u "$DOCKER_USERNAME" --password-stdin
 docker push "landlord/landlordd:$version"
 docker push "landlord/landlord:$version"
+docker push "landlord/landlord-alpine:$version"
