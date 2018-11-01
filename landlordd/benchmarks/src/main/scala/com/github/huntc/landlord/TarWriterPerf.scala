@@ -19,7 +19,7 @@ object TarWriterPerf {
    * An entry point for debugging purposes - invoke whatever you need to debug
    */
   def main(args: Array[String]): Unit = {
-    new UnixDomainSocketPerf().setup()
+    new TarWriterPerf().setup()
   }
 }
 
