@@ -23,4 +23,5 @@ object Dependencies {
 
 object Resolvers {
   lazy val typesafeBintrayReleases = bintrayRepo("typesafe", "maven-releases")
+  lazy val akkaSnapshots = Resolver.bintrayRepo("akka", "snapshots")
 }

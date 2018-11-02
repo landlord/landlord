@@ -17,7 +17,7 @@ lazy val daemon = project
       akkaTestKit % Test,
       scalaTest % Test
     ),
-    resolvers += Resolvers.typesafeBintrayReleases,
+    resolvers ++= Seq(Resolvers.typesafeBintrayReleases, Resolvers.akkaSnapshots),
     scriptClasspathOrdering := {
       val assemblyFile = assembly.value
       Seq(assemblyFile -> ("lib/" + assemblyFile.getName))
