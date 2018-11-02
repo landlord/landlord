@@ -98,7 +98,7 @@ lazy val landlordd = project
     name := "landlordd",
     inThisBuild(List(
       organization := "com.github.huntc",
-      scalaVersion := "2.12.6",
+      scalaVersion := "2.12.7",
       version      := sys.env.getOrElse("RELEASE_VERSION", "0.1.0-SNAPSHOT"),
       scalacOptions ++= Seq("-unchecked", "-deprecation"),
       ScalariformKeys.preferences := ScalariformKeys.preferences.value
