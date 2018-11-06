@@ -27,13 +27,15 @@ where options include:
     -showversion  print product version and continue
     -? -help      print this help message
     -host | -H    host to connect to. available schemes: \"unix\", \"tcp\"
-    -wait         if provided, wait until landlordd is ready before connecting";
+    -ready        define a readiness check. available checks: \"landlordd\", \"tcp://<host>:<port>\"\
+    -wait         wait for all readiness checks to be successful before connecting";
 
 fn main() {
     let args: Vec<String> = [
         env::var(JAVA_OPTS).map(parse_java_opts).unwrap_or_default(),
         env::args().skip(1).collect(),
-    ].concat();
+    ]
+        .concat();
 
     let parsed = parse_java_args(&args);
 
@@ -55,6 +57,7 @@ fn main() {
                         class,
                         args,
                         parsed.props.as_slice(),
+                        parsed.readiness_checks.as_slice(),
                         parsed.wait,
                         || UnixStream::connect(&path),
                     );
@@ -66,6 +69,7 @@ fn main() {
                         class,
                         args,
                         parsed.props.as_slice(),
+                        parsed.readiness_checks.as_slice(),
                         parsed.wait,
                         || TcpStream::connect(&address),
                     );
@@ -106,6 +110,7 @@ fn handle_execute_class<IO, NewS, S>(
     class: &S,
     args: &[S],
     props: &[(S, S)],
+    readiness_checks: &[WaitTarget],
     wait: bool,
     mut new_stream: NewS,
 ) -> ()
@@ -119,12 +124,24 @@ where
     spawn_and_handle_signals(tx.clone());
 
     if wait {
-        if let Some(code) = wait_until_ready(
-            &mut new_stream,
-            &rx,
-            time::Duration::from_millis(RETRY_DELAY_MILLIS),
-        ) {
-            process::exit(code);
+        for check in readiness_checks {
+            let maybe_exit_code = match check {
+                WaitTarget::Landlordd => wait_until_landlordd_ready(
+                    &mut new_stream,
+                    &rx,
+                    time::Duration::from_millis(RETRY_DELAY_MILLIS),
+                ),
+
+                WaitTarget::Tcp(address) => wait_until_tcp_ready(
+                    address,
+                    &rx,
+                    time::Duration::from_millis(RETRY_DELAY_MILLIS),
+                ),
+            };
+
+            if let Some(code) = maybe_exit_code {
+                process::exit(code);
+            }
         }
     }
 

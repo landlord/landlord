@@ -13,6 +13,12 @@ pub enum Host {
 }
 
 #[derive(PartialEq, Debug)]
+pub enum WaitTarget {
+    Landlordd,
+    Tcp(String),
+}
+
+#[derive(PartialEq, Debug)]
 pub struct JavaArgs {
     pub cp: Vec<String>,
     pub errors: Vec<String>,
@@ -21,6 +27,7 @@ pub struct JavaArgs {
     pub host: Host,
     pub version: bool,
     pub wait: bool,
+    pub readiness_checks: Vec<WaitTarget>,
 }
 
 fn default() -> JavaArgs {
@@ -32,6 +39,7 @@ fn default() -> JavaArgs {
         host: Host::Unix("/var/run/landlord/landlordd.sock".to_string()),
         version: false,
         wait: false,
+        readiness_checks: vec![],
     }
 }
 
@@ -166,6 +174,27 @@ pub fn parse_java_args<S: AsRef<str>>(args: &[S]) -> JavaArgs {
                     if let [key, value] = parts[..] {
                         jargs.props.push((key.to_string(), value.to_string()))
                     }
+                }
+            }
+
+            Some(flag) if flag == "-ready" => {
+                if let Some(target) = iter.next() {
+                    if target == "landlordd" {
+                        jargs.readiness_checks.push(WaitTarget::Landlordd);
+                    } else if target.starts_with("tcp://") {
+                        jargs
+                            .readiness_checks
+                            .push(WaitTarget::Tcp(target[6..].to_string()));
+                    } else {
+                        jargs.errors.push(format!(
+                            "{} must begin with \"landlordd\" or \"tcp://\"",
+                            flag
+                        ))
+                    }
+                } else {
+                    jargs
+                        .errors
+                        .push(format!("{} requires target specification", flag))
                 }
             }
 
@@ -321,6 +350,10 @@ fn test_all() {
             "-d64",
             "-server",
             "-wait",
+            "-ready",
+            "landlordd",
+            "-ready",
+            "tcp://localhost:1234",
             "-host",
             "unix:///dev/null",
             "-cp",
@@ -343,6 +376,10 @@ fn test_all() {
             host: Host::Unix("/dev/null".to_string()),
             version: false,
             wait: true,
+            readiness_checks: vec![
+                WaitTarget::Landlordd,
+                WaitTarget::Tcp("localhost:1234".to_string())
+            ],
         }
     );
 }

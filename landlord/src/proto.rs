@@ -203,8 +203,7 @@ pub fn class_path_with_names<S: AsRef<str>>(class_path: &[S]) -> Vec<(String, St
             } else {
                 (e.to_string(), i.to_string(), i.to_string())
             }
-        })
-        .collect()
+        }).collect()
 }
 
 /// given a reader, reads a landlord payload, i.e. a 4-byte encoded (big endian) size followed
