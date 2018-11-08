@@ -1,4 +1,5 @@
 extern crate landlord;
+extern crate trust_dns_resolver;
 
 use landlord::args::*;
 use landlord::bindings::*;
@@ -7,6 +8,7 @@ use std::net::TcpStream;
 use std::os::unix::net::UnixStream;
 use std::sync::mpsc::*;
 use std::{env, io, process, str, time};
+use trust_dns_resolver::Resolver;
 
 const CARGO_VERSION: &str = env!("CARGO_PKG_VERSION");
 const JAVA_OPTS: &str = "JAVA_OPTS";
@@ -45,6 +47,15 @@ fn main() {
         eprintln!("landlord version \"{}\"", version);
     }
 
+    let resolver = match Resolver::from_system_conf() {
+        Ok(resolver) => resolver,
+        Err(e) => {
+            eprintln!("landlord: cannot create resolver, {}", e);
+
+            process::exit(1);
+        }
+    };
+
     if parsed.errors.is_empty() {
         match parsed.mode {
             ExecutionMode::Class {
@@ -53,6 +64,7 @@ fn main() {
             } => match parsed.host {
                 Host::Unix(path) => {
                     handle_execute_class(
+                        &resolver,
                         parsed.cp.as_slice(),
                         class,
                         args,
@@ -65,13 +77,14 @@ fn main() {
 
                 Host::Tcp(address) => {
                     handle_execute_class(
+                        &resolver,
                         parsed.cp.as_slice(),
                         class,
                         args,
                         parsed.props.as_slice(),
                         parsed.readiness_checks.as_slice(),
                         parsed.wait,
-                        || TcpStream::connect(&address),
+                        || resolve_address(&resolver, &address).and_then(TcpStream::connect),
                     );
                 }
             },
@@ -106,6 +119,7 @@ fn main() {
 }
 
 fn handle_execute_class<IO, NewS, S>(
+    resolver: &Resolver,
     cp: &[S],
     class: &S,
     args: &[S],
@@ -133,6 +147,7 @@ where
                 ),
 
                 WaitTarget::Tcp(address) => wait_until_tcp_ready(
+                    resolver,
                     address,
                     &rx,
                     time::Duration::from_millis(RETRY_DELAY_MILLIS),
