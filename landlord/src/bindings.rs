@@ -7,6 +7,33 @@ use std::os::unix::net::UnixStream;
 use std::sync::mpsc::*;
 use std::{fs, io, marker, net, path, process, thread, time};
 use tar::Builder;
+use trust_dns_resolver::Resolver;
+
+/// Resolves a provided address. If the address begins with _, we
+/// simply assume it is DNS SRV and use Trust DNS to resolve it.
+pub fn resolve_address(resolver: &Resolver, address: &str) -> io::Result<String> {
+    if address.starts_with("_") {
+        resolver
+            .lookup_srv(&address)
+            .map_err(|e| {
+                io::Error::new(
+                    io::ErrorKind::Other,
+                    format!("cannot resolve record: {}", e),
+                )
+            }).and_then(|response| {
+                if let Some(record) = response.iter().next() {
+                    Ok(format!("{}:{}", record.target(), record.port()))
+                } else {
+                    Err(io::Error::new(
+                        io::ErrorKind::Other,
+                        "cannot resolve address",
+                    ))
+                }
+            })
+    } else {
+        Ok(address.to_string())
+    }
+}
 
 /// uses `new_stream` to open a connection to
 /// landlordd. if it fails in an unexpected manner,
@@ -57,13 +84,14 @@ where
     }
 }
 
-/// Opens a connection to the provided address, or if unable to, waits
-/// a specified amount of time before retrying.
+/// Resolves and opens a connection to the provided address,
+/// or if unable to, waits a specified amount of time before retrying.
 ///
 /// If a SIGINT, SIGTERM, or SIGQUIT is received while waiting, an exit
 /// code will be returned.
-pub fn wait_until_tcp_ready<A: net::ToSocketAddrs>(
-    addr: A,
+pub fn wait_until_tcp_ready(
+    resolver: &Resolver,
+    addr: &str,
     reader: &Receiver<Input>,
     sleep_time: time::Duration,
 ) -> Option<i32> {
@@ -74,8 +102,10 @@ pub fn wait_until_tcp_ready<A: net::ToSocketAddrs>(
             }
         }
 
-        if let Ok(_) = TcpStream::connect(&addr) {
-            return None;
+        if let Ok(address) = resolve_address(resolver, addr) {
+            if let Ok(_) = TcpStream::connect(address) {
+                return None;
+            }
         }
 
         thread::sleep(sleep_time);
