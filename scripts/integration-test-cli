@@ -33,7 +33,7 @@ landlordd/daemon/target/universal/stage/bin/landlordd --host "unix://$DIR/landlo
 LANDLORDD_PID="$!"
 
 # Test landlord -wait parameter by starting before landlordd is given time to start
-OUTPUT1=$(echo Testing | ./landlord/target/release/landlord -wait -Dgreeting='hello world' -H "unix://$DIR/landlordd.sock" -cp landlordd/test/target/scala-2.12/classes example.Hello)
+OUTPUT1=$(echo Testing | ./landlord/target/release/landlord -ready landlordd -wait -Dgreeting='hello world' -H "unix://$DIR/landlordd.sock" -cp landlordd/test/target/scala-2.12/classes example.Hello)
 
 # Run a program that uses stdin and properties
 OUTPUT2=$(echo Testing | ./landlord/target/release/landlord -Dgreeting='hello world' -H "unix://$DIR/landlordd.sock" -cp landlordd/test/target/scala-2.12/classes example.Hello)

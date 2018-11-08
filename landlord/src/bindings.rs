@@ -14,7 +14,7 @@ use tar::Builder;
 /// after sleeping for some time. If a SIGINT, SIGTERM, or
 /// SIGQUIT is received while waiting, an exit code will be
 /// returned.
-pub fn wait_until_ready<NewS, IO>(
+pub fn wait_until_landlordd_ready<NewS, IO>(
     new_stream: &mut NewS,
     reader: &Receiver<Input>,
     sleep_time: time::Duration,
@@ -38,7 +38,8 @@ where
                 // it will respond with three question marks (ASCII 63)
                 // otherwise we'll keep retrying
 
-                let result = s.write_all(&[b'?'])
+                let result = s
+                    .write_all(&[b'?'])
                     .and_then(|_| s.flush())
                     .and_then(|_| s.shutdown(net::Shutdown::Write));
 
@@ -50,6 +51,31 @@ where
                     }
                 }
             }
+        }
+
+        thread::sleep(sleep_time);
+    }
+}
+
+/// Opens a connection to the provided address, or if unable to, waits
+/// a specified amount of time before retrying.
+///
+/// If a SIGINT, SIGTERM, or SIGQUIT is received while waiting, an exit
+/// code will be returned.
+pub fn wait_until_tcp_ready<A: net::ToSocketAddrs>(
+    addr: A,
+    reader: &Receiver<Input>,
+    sleep_time: time::Duration,
+) -> Option<i32> {
+    loop {
+        while let Some(Input::Signal(s)) = reader.try_recv().ok() {
+            if s == libc::SIGINT || s == libc::SIGTERM || s == libc::SIGQUIT {
+                return Some(128 + s);
+            }
+        }
+
+        if let Ok(_) = TcpStream::connect(&addr) {
+            return None;
         }
 
         thread::sleep(sleep_time);
@@ -292,8 +318,7 @@ where
                         }
                     })
                 })
-            })
-            .and_then(|_| {
+            }).and_then(|_| {
                 tar_builder
                     .finish()
                     .and_then(|_| tar_builder.into_inner())
