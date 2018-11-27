@@ -20,7 +20,8 @@ const USAGE: &str = "Usage: landlord [-options] class [args...]
    or  landlord [-options] -jar jarfile [args...]
            (to execute a jar file)
 where options include:
-    -cp <class search path of directories and zip/jar files> -classpath <class search path of directories and zip/jar files>
+    -cp <class search path of directories and zip/jar files>
+    -classpath <class search path of directories and zip/jar files>
                   A : separated list of directories, JAR archives,
                   and ZIP archives to search for class files.
     -D<name>=<value>
@@ -28,9 +29,13 @@ where options include:
     -version      print product version and exit
     -showversion  print product version and continue
     -? -help      print this help message
-    -host | -H    host to connect to. available schemes: \"unix\", \"tcp\"
-    -ready        define a readiness check. available checks: \"landlordd\", \"tcp://<host>:<port>\"\
-    -wait         wait for all readiness checks to be successful before connecting";
+    -host | -H    host to connect to
+                  available schemes: \"unix\", \"tcp\"
+    -ready        define a readiness check
+                  available checks: \"landlordd\", \"tcp://<host>:<port>\"\
+    -wait         wait for readiness checks to be successful before connecting
+    -wait-time    optional duration of time (milliseconds) to wait
+                  for readiness checks to succeed";
 
 fn main() {
     let args: Vec<String> = [
@@ -71,6 +76,7 @@ fn main() {
                         parsed.props.as_slice(),
                         parsed.readiness_checks.as_slice(),
                         parsed.wait,
+                        parsed.wait_time,
                         || UnixStream::connect(&path),
                     );
                 }
@@ -84,6 +90,7 @@ fn main() {
                         parsed.props.as_slice(),
                         parsed.readiness_checks.as_slice(),
                         parsed.wait,
+                        parsed.wait_time,
                         || resolve_address(&resolver, &address).and_then(TcpStream::connect),
                     );
                 }
@@ -126,6 +133,7 @@ fn handle_execute_class<IO, NewS, S>(
     props: &[(S, S)],
     readiness_checks: &[WaitTarget],
     wait: bool,
+    wait_time: Option<time::Duration>,
     mut new_stream: NewS,
 ) -> ()
 where
@@ -138,12 +146,16 @@ where
     spawn_and_handle_signals(tx.clone());
 
     if wait {
+        let start = time::Instant::now();
+
         for check in readiness_checks {
             let maybe_exit_code = match check {
                 WaitTarget::Landlordd => wait_until_landlordd_ready(
                     &mut new_stream,
                     &rx,
                     time::Duration::from_millis(RETRY_DELAY_MILLIS),
+                    &start,
+                    wait_time,
                 ),
 
                 WaitTarget::Tcp(address) => wait_until_tcp_ready(
@@ -151,6 +163,8 @@ where
                     address,
                     &rx,
                     time::Duration::from_millis(RETRY_DELAY_MILLIS),
+                    &start,
+                    wait_time,
                 ),
             };
 

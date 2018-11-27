@@ -38,13 +38,20 @@ pub fn resolve_address(resolver: &Resolver, address: &str) -> io::Result<String>
 /// uses `new_stream` to open a connection to
 /// landlordd. if it fails in an unexpected manner,
 /// i.e. landlordd isn't ready yet, it retries
-/// after sleeping for some time. If a SIGINT, SIGTERM, or
+/// after sleeping for some time.
+///
+/// If a SIGINT, SIGTERM, or
 /// SIGQUIT is received while waiting, an exit code will be
 /// returned.
+///
+/// If wait_time is provided and that amount of time
+/// has elapsed without being ready, an exit code will be returned.
 pub fn wait_until_landlordd_ready<NewS, IO>(
     new_stream: &mut NewS,
     reader: &Receiver<Input>,
     sleep_time: time::Duration,
+    start: &time::Instant,
+    wait_time: Option<time::Duration>,
 ) -> Option<i32>
 where
     NewS: FnMut() -> io::Result<IO>,
@@ -58,7 +65,13 @@ where
         }
 
         match new_stream() {
-            Err(_) => {}
+            Err(_) => {
+                if let Some(limit) = wait_time {
+                    if start.elapsed() >= limit {
+                        return Some(5);
+                    }
+                }
+            }
 
             Ok(mut s) => {
                 // write an unknown command to landlordd, upon which
@@ -89,11 +102,16 @@ where
 ///
 /// If a SIGINT, SIGTERM, or SIGQUIT is received while waiting, an exit
 /// code will be returned.
+///
+/// If wait_time is provided and that amount of time
+/// has elapsed without being ready, an exit code will be returned.
 pub fn wait_until_tcp_ready(
     resolver: &Resolver,
     addr: &str,
     reader: &Receiver<Input>,
     sleep_time: time::Duration,
+    start: &time::Instant,
+    wait_time: Option<time::Duration>,
 ) -> Option<i32> {
     loop {
         while let Some(Input::Signal(s)) = reader.try_recv().ok() {
@@ -105,6 +123,12 @@ pub fn wait_until_tcp_ready(
         if let Ok(address) = resolve_address(resolver, addr) {
             if let Ok(_) = TcpStream::connect(address) {
                 return None;
+            }
+        }
+
+        if let Some(limit) = wait_time {
+            if start.elapsed() >= limit {
+                return Some(4);
             }
         }
 

@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 #[derive(PartialEq, Debug)]
 pub enum ExecutionMode {
     Class { class: String, args: Vec<String> },
@@ -27,6 +29,7 @@ pub struct JavaArgs {
     pub host: Host,
     pub version: bool,
     pub wait: bool,
+    pub wait_time: Option<Duration>,
     pub readiness_checks: Vec<WaitTarget>,
 }
 
@@ -39,6 +42,7 @@ fn default() -> JavaArgs {
         host: Host::Unix("/var/run/landlord/landlordd.sock".to_string()),
         version: false,
         wait: false,
+        wait_time: None,
         readiness_checks: vec![],
     }
 }
@@ -202,6 +206,16 @@ pub fn parse_java_args<S: AsRef<str>>(args: &[S]) -> JavaArgs {
                 jargs.wait = true;
             }
 
+            Some(flag) if flag == "-wait-time" => {
+                if let Some(Ok(duration)) = iter.next().map(|value| value.parse::<u64>()) {
+                    jargs.wait_time = Some(Duration::from_millis(duration));
+                } else {
+                    jargs
+                        .errors
+                        .push(format!("{} requires time specification (ms)", flag))
+                }
+            }
+
             Some(flag) if noop_flags.contains(&flag) => {}
 
             Some(flag) => jargs.errors.push(format!("Unrecognized option: {}", flag)),
@@ -350,6 +364,8 @@ fn test_all() {
             "-d64",
             "-server",
             "-wait",
+            "-wait-time",
+            "30000",
             "-ready",
             "landlordd",
             "-ready",
@@ -376,6 +392,7 @@ fn test_all() {
             host: Host::Unix("/dev/null".to_string()),
             version: false,
             wait: true,
+            wait_time: Some(Duration::from_secs(30)),
             readiness_checks: vec![
                 WaitTarget::Landlordd,
                 WaitTarget::Tcp("localhost:1234".to_string())
