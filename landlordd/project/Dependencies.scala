@@ -3,7 +3,7 @@ import sbt.Resolver.bintrayRepo
 
 object Versions {
   lazy val akka = "2.5.17"
-  lazy val alpakka = "0.20"
+  lazy val alpakka = "1.0-M1+40-5c9c9677"
   lazy val commonsCompress = "1.18"
   lazy val logbackClassic = "1.2.3"
   lazy val scalaTest = "3.0.5"
@@ -23,4 +23,5 @@ object Dependencies {
 
 object Resolvers {
   lazy val typesafeBintrayReleases = bintrayRepo("typesafe", "maven-releases")
+  lazy val akkaSnapshots = Resolver.bintrayRepo("akka", "snapshots")
 }

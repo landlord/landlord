@@ -7,7 +7,6 @@ import Dependencies._
 lazy val daemon = project
   .in(file("daemon"))
   .settings(
-    name := "daemon",
     libraryDependencies ++= Seq(
       akkaStream,
       akkSlf4j,
@@ -18,7 +17,7 @@ lazy val daemon = project
       akkaTestKit % Test,
       scalaTest % Test
     ),
-    resolvers += Resolvers.typesafeBintrayReleases,
+    resolvers ++= Seq(Resolvers.typesafeBintrayReleases, Resolvers.akkaSnapshots),
     scriptClasspathOrdering := {
       val assemblyFile = assembly.value
       Seq(assemblyFile -> ("lib/" + assemblyFile.getName))
@@ -88,9 +87,11 @@ lazy val daemon = project
 
 lazy val test = project
   .in(file("test"))
-  .settings(
-    name := "test"
-  )
+
+lazy val benchmarks = project
+  .in(file("benchmarks"))
+  .enablePlugins(JmhPlugin)
+  .dependsOn(daemon)
 
 lazy val landlordd = project
   .in(file("."))
